@@ -62,7 +62,7 @@ func (w *Watcher) Run(ctx context.Context) {
 
 // refresh fetches data from easyrun and updates cache
 func (w *Watcher) refresh() {
-	// Get agents
+	// Get agents for IP mapping
 	agents, err := w.fetchAgents()
 	if err != nil {
 		log.Printf("Failed to fetch agents: %v", err)
@@ -78,17 +78,18 @@ func (w *Watcher) refresh() {
 		}
 	}
 
-	// Get tasks from each agent
+	// Get cluster status (all tasks from all agents)
+	status, err := w.fetchClusterStatus()
+	if err != nil {
+		log.Printf("Failed to fetch cluster status: %v", err)
+		return
+	}
+
+	// Build job -> IPs map
 	data := make(map[string][]net.IP)
 
-	for _, agent := range agents {
-		tasks, err := w.fetchTasks(agent.Endpoint)
-		if err != nil {
-			log.Printf("Failed to fetch tasks from %s: %v", agent.ID, err)
-			continue
-		}
-
-		ip := agentIPs[agent.ID]
+	for agentID, tasks := range status {
+		ip := agentIPs[agentID]
 		if ip == nil {
 			continue
 		}
@@ -132,20 +133,22 @@ func (w *Watcher) fetchAgents() ([]Agent, error) {
 	return agents, nil
 }
 
-// fetchTasks gets tasks from an agent
-func (w *Watcher) fetchTasks(endpoint string) ([]Task, error) {
-	resp, err := w.client.Get(endpoint + "/tasks")
+// fetchClusterStatus gets all tasks from all agents via leader
+func (w *Watcher) fetchClusterStatus() (map[string][]Task, error) {
+	resp, err := w.client.Get(w.agentAddr + "/v1/status")
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	var tasks []Task
-	if err := json.NewDecoder(resp.Body).Decode(&tasks); err != nil {
+	var status struct {
+		TasksByAgent map[string][]Task `json:"tasks_by_agent"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
 		return nil, err
 	}
 
-	return tasks, nil
+	return status.TasksByAgent, nil
 }
 
 // extractIP extracts IP from endpoint (http://ip:port -> ip)

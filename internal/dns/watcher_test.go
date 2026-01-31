@@ -22,14 +22,21 @@ func TestWatcherRefresh(t *testing.T) {
 		json.NewEncoder(w).Encode(agents)
 	})
 
-	// Mock /tasks endpoint
-	mux.HandleFunc("/tasks", func(w http.ResponseWriter, r *http.Request) {
-		tasks := []Task{
-			{ID: "task1", JobID: "job1", JobName: "myapp", State: "running"},
-			{ID: "task2", JobID: "job2", JobName: "myapp", State: "running"},
-			{ID: "task3", JobID: "job3", JobName: "other", State: "stopped"},
+	// Mock /v1/status endpoint
+	mux.HandleFunc("/v1/status", func(w http.ResponseWriter, r *http.Request) {
+		status := map[string]any{
+			"agents":        1,
+			"total_tasks":   3,
+			"running_tasks": 2,
+			"tasks_by_agent": map[string][]Task{
+				"agent1": {
+					{ID: "task1", JobID: "job1", JobName: "myapp", State: "running"},
+					{ID: "task2", JobID: "job2", JobName: "myapp", State: "running"},
+					{ID: "task3", JobID: "job3", JobName: "other", State: "stopped"},
+				},
+			},
 		}
-		json.NewEncoder(w).Encode(tasks)
+		json.NewEncoder(w).Encode(status)
 	})
 
 	server := httptest.NewServer(mux)
@@ -88,6 +95,15 @@ func TestWatcherNoAgents(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/agents", func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode([]Agent{})
+	})
+	mux.HandleFunc("/v1/status", func(w http.ResponseWriter, r *http.Request) {
+		status := map[string]any{
+			"agents":         0,
+			"total_tasks":    0,
+			"running_tasks":  0,
+			"tasks_by_agent": map[string][]Task{},
+		}
+		json.NewEncoder(w).Encode(status)
 	})
 
 	server := httptest.NewServer(mux)
