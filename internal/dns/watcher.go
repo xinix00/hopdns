@@ -13,7 +13,6 @@ import (
 // Task represents an easyrun task
 type Task struct {
 	ID      string `json:"id"`
-	JobID   string `json:"job_id"`
 	JobName string `json:"job_name"`
 	State   string `json:"state"`
 }
