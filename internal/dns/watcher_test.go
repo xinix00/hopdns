@@ -30,9 +30,9 @@ func TestWatcherRefresh(t *testing.T) {
 			"running_tasks": 2,
 			"tasks_by_agent": map[string][]Task{
 				"agent1": {
-					{ID: "task1", JobID: "job1", JobName: "myapp", State: "running"},
-					{ID: "task2", JobID: "job2", JobName: "myapp", State: "running"},
-					{ID: "task3", JobID: "job3", JobName: "other", State: "stopped"},
+					{ID: "task1", JobName: "myapp", State: "running"},
+					{ID: "task2", JobName: "myapp", State: "running"},
+					{ID: "task3", JobName: "other", State: "stopped"},
 				},
 			},
 		}
