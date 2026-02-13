@@ -136,7 +136,7 @@ func parseJobFromData(line string) string {
 	var ev struct {
 		Job string `json:"job"`
 	}
-	json.Unmarshal([]byte(data), &ev)
+	_ = json.Unmarshal([]byte(data), &ev)
 	return ev.Job
 }
 

@@ -19,7 +19,7 @@ func TestWatcherRefresh(t *testing.T) {
 		agents := []Agent{
 			{ID: "agent1", Endpoint: serverURL},
 		}
-		json.NewEncoder(w).Encode(agents)
+		_ = json.NewEncoder(w).Encode(agents)
 	})
 
 	// Mock /v1/status endpoint
@@ -36,7 +36,7 @@ func TestWatcherRefresh(t *testing.T) {
 				},
 			},
 		}
-		json.NewEncoder(w).Encode(status)
+		_ = json.NewEncoder(w).Encode(status)
 	})
 
 	server := httptest.NewServer(mux)
@@ -94,7 +94,7 @@ func TestExtractIPInvalid(t *testing.T) {
 func TestWatcherNoAgents(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/agents", func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode([]Agent{})
+		_ = json.NewEncoder(w).Encode([]Agent{})
 	})
 	mux.HandleFunc("/v1/status", func(w http.ResponseWriter, r *http.Request) {
 		status := map[string]any{
@@ -103,7 +103,7 @@ func TestWatcherNoAgents(t *testing.T) {
 			"running_tasks":  0,
 			"tasks_by_agent": map[string][]Task{},
 		}
-		json.NewEncoder(w).Encode(status)
+		_ = json.NewEncoder(w).Encode(status)
 	})
 
 	server := httptest.NewServer(mux)

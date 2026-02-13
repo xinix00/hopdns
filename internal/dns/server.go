@@ -84,5 +84,5 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 		}
 	}
 
-	w.WriteMsg(m)
+	_ = w.WriteMsg(m)
 }

@@ -34,7 +34,7 @@ func main() {
 		<-sigCh
 		log.Println("Shutting down...")
 		cancel()
-		server.Shutdown()
+		_ = server.Shutdown()
 	}()
 
 	if err := server.Run(); err != nil {
