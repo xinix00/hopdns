@@ -17,7 +17,7 @@ go build -o bin/easydns ./cmd/easydns
 ## Architecture
 
 - `internal/dns/cache.go` - Thread-safe cache for job->IPs mapping
-- `internal/dns/watcher.go` - Polls easyrun agent, updates cache
+- `internal/dns/watcher.go` - Connects to easyrun agent via SSE, updates cache on events
 - `internal/dns/server.go` - DNS server using miekg/dns
 - `cmd/easydns/main.go` - CLI entry point
 
@@ -25,6 +25,6 @@ go build -o bin/easydns ./cmd/easydns
 
 KISS approach:
 - Each node runs easydns
-- Queries local easyrun agent (no direct leader dependency)
+- Connects to local easyrun agent via SSE (`/v1/events`) for real-time updates
 - Caches results for availability
-- If agent down, serves stale cache
+- If agent down, serves stale cache and reconnects automatically

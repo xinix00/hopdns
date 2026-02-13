@@ -5,9 +5,10 @@ DNS service discovery for easyrun.
 ## Features
 
 - Resolves job names to task IPs via DNS
-- Caches results from local easyrun agent
+- **Real-time updates** via SSE (Server-Sent Events) from easyrun agent
 - Returns multiple A records for jobs with multiple tasks
 - Short TTL (5s) for dynamic services
+- Graceful fallback: reconnects automatically on SSE disconnect
 
 ## Usage
 
@@ -15,7 +16,7 @@ DNS service discovery for easyrun.
 ./easydns -listen :5353 -agent http://127.0.0.1:8080 -domain easyrun.local
 ```
 
-Runs on each node, queries the local easyrun agent.
+Runs on each node, connects to the local easyrun agent.
 
 ## Flags
 
@@ -25,9 +26,9 @@ Runs on each node, queries the local easyrun agent.
 
 ## How it works
 
-1. Polls local easyrun agent every 5 seconds
-2. Fetches all agents and their tasks from cluster
-3. Builds cache: job name -> list of IPs
+1. Connects to local easyrun agent via SSE (`/v1/events`)
+2. Receives real-time notifications when jobs or tasks change
+3. Fetches updated state and rebuilds cache: job name -> list of IPs
 4. Only includes tasks in `running` state
 5. Returns all IPs as A records (client can choose)
 
@@ -47,6 +48,7 @@ dig @localhost -p 5353 myapp.easyrun.local
 
 ## Cache behavior
 
-- Cache is updated every 5 seconds
+- Cache is updated in real-time via SSE events
 - If agent is unreachable, serves stale cache
+- Automatically reconnects on SSE disconnect
 - This ensures DNS availability even during brief outages
