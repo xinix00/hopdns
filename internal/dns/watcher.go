@@ -146,15 +146,15 @@ func (w *Watcher) watchSSE(ctx context.Context) error {
 }
 
 // parseJobFromData extracts the job name from an SSE data line.
-// e.g. `data: {"job":"my-api"}` → "my-api", `data: {}` → ""
+// e.g. `data: {"name":"my-api"}` → "my-api", `data: {}` → ""
 func parseJobFromData(line string) string {
 	data := strings.TrimPrefix(line, "data:")
 	data = strings.TrimSpace(data)
 	var ev struct {
-		Job string `json:"job"`
+		Name string `json:"name"`
 	}
 	_ = json.Unmarshal([]byte(data), &ev)
-	return ev.Job
+	return ev.Name
 }
 
 

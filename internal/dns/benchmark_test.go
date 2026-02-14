@@ -232,10 +232,10 @@ func BenchmarkExtractIP(b *testing.B) {
 
 func BenchmarkParseJobFromData(b *testing.B) {
 	lines := []string{
-		`data: {"job":"my-api"}`,
-		`data: {"job":"web-frontend"}`,
-		`data: {"job":"worker-pool"}`,
-		`data: {"job":"easydns"}`,
+		`data: {"name":"my-api"}`,
+		`data: {"name":"web-frontend"}`,
+		`data: {"name":"worker-pool"}`,
+		`data: {"name":"easydns"}`,
 	}
 
 	b.ResetTimer()
