@@ -44,7 +44,7 @@ func TestWatcherRefresh(t *testing.T) {
 	serverURL = server.URL
 
 	cache := NewCache()
-	watcher := NewWatcher(server.URL, cache)
+	watcher := NewWatcher(server.URL, cache, "")
 
 	// Manually trigger refresh
 	watcher.refresh()
@@ -113,7 +113,7 @@ func TestWatcherNoAgents(t *testing.T) {
 	// Pre-populate cache
 	cache.Set("oldapp", []net.IP{net.ParseIP("10.0.0.1")})
 
-	watcher := NewWatcher(server.URL, cache)
+	watcher := NewWatcher(server.URL, cache, "")
 	watcher.refresh()
 
 	// Cache should be cleared since no agents

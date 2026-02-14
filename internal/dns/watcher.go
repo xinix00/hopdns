@@ -32,16 +32,30 @@ type Watcher struct {
 	cache     *Cache
 	client    *http.Client
 	interval  time.Duration
+	apiKey    string
 }
 
 // NewWatcher creates a new watcher
-func NewWatcher(agentAddr string, cache *Cache) *Watcher {
+func NewWatcher(agentAddr string, cache *Cache, apiKey string) *Watcher {
 	return &Watcher{
 		agentAddr: agentAddr,
 		cache:     cache,
 		client:    &http.Client{Timeout: 10 * time.Second},
 		interval:  5 * time.Second,
+		apiKey:    apiKey,
 	}
+}
+
+// get performs a GET request with API key authentication
+func (w *Watcher) get(url string) (*http.Response, error) {
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	if w.apiKey != "" {
+		req.Header.Set("X-API-Key", w.apiKey)
+	}
+	return w.client.Do(req)
 }
 
 // Run connects to the SSE event stream and refreshes on state changes.
@@ -71,6 +85,9 @@ func (w *Watcher) watchSSE(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, "GET", w.agentAddr+"/v1/events", nil)
 	if err != nil {
 		return err
+	}
+	if w.apiKey != "" {
+		req.Header.Set("X-API-Key", w.apiKey)
 	}
 
 	resp, err := (&http.Client{}).Do(req) // no timeout — SSE is long-lived
@@ -143,7 +160,7 @@ func parseJobFromData(line string) string {
 
 // refreshJob fetches status for a single job and updates just that entry in the cache.
 func (w *Watcher) refreshJob(jobName string) {
-	resp, err := w.client.Get(fmt.Sprintf("%s/v1/jobs/%s/status", w.agentAddr, jobName))
+	resp, err := w.get(fmt.Sprintf("%s/v1/jobs/%s/status", w.agentAddr, jobName))
 	if err != nil {
 		log.Printf("Failed to fetch job status for %s: %v", jobName, err)
 		w.refresh() // fallback to full
@@ -252,7 +269,7 @@ func (w *Watcher) refresh() {
 
 // fetchAgents gets agents from local easyrun
 func (w *Watcher) fetchAgents() ([]Agent, error) {
-	resp, err := w.client.Get(w.agentAddr + "/v1/agents")
+	resp, err := w.get(w.agentAddr + "/v1/agents")
 	if err != nil {
 		return nil, err
 	}
@@ -267,7 +284,7 @@ func (w *Watcher) fetchAgents() ([]Agent, error) {
 
 // fetchClusterStatus gets all tasks from all agents via leader
 func (w *Watcher) fetchClusterStatus() (map[string][]Task, error) {
-	resp, err := w.client.Get(w.agentAddr + "/v1/status")
+	resp, err := w.get(w.agentAddr + "/v1/status")
 	if err != nil {
 		return nil, err
 	}
