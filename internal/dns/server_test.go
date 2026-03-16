@@ -9,7 +9,7 @@ import (
 
 func TestServerHandleQuery(t *testing.T) {
 	cache := NewCache()
-	cache.Set("myapp", []net.IP{net.ParseIP("192.168.1.10"), net.ParseIP("192.168.1.20")})
+	cache.Set("prod", "myapp", []net.IP{net.ParseIP("192.168.1.10"), net.ParseIP("192.168.1.20")})
 
 	server := NewServer(cache, ":0", "easyrun.local")
 
@@ -59,7 +59,7 @@ func TestServerHandleQueryNoMatch(t *testing.T) {
 
 func TestServerHandleQueryWrongDomain(t *testing.T) {
 	cache := NewCache()
-	cache.Set("myapp", []net.IP{net.ParseIP("192.168.1.10")})
+	cache.Set("prod", "myapp", []net.IP{net.ParseIP("192.168.1.10")})
 
 	server := NewServer(cache, ":0", "easyrun.local")
 
@@ -71,6 +71,49 @@ func TestServerHandleQueryWrongDomain(t *testing.T) {
 
 	if len(rw.msg.Answer) != 0 {
 		t.Errorf("Expected 0 answers for wrong domain, got %d", len(rw.msg.Answer))
+	}
+}
+
+func TestServerHandleQueryClusterSpecific(t *testing.T) {
+	cache := NewCache()
+	cache.Set("prod-eu", "myapp", []net.IP{net.ParseIP("10.0.0.1")})
+	cache.Set("prod-us", "myapp", []net.IP{net.ParseIP("10.0.1.1")})
+
+	server := NewServer(cache, ":0", "easyrun.local")
+
+	// Query specific cluster
+	req := new(dns.Msg)
+	req.SetQuestion("myapp.prod-eu.easyrun.local.", dns.TypeA)
+
+	rw := &mockResponseWriter{}
+	server.handleQuery(rw, req)
+
+	if len(rw.msg.Answer) != 1 {
+		t.Fatalf("Expected 1 answer for cluster-specific query, got %d", len(rw.msg.Answer))
+	}
+
+	a := rw.msg.Answer[0].(*dns.A)
+	if a.A.String() != "10.0.0.1" {
+		t.Errorf("Expected 10.0.0.1, got %s", a.A.String())
+	}
+}
+
+func TestServerHandleQueryMergedClusters(t *testing.T) {
+	cache := NewCache()
+	cache.Set("prod-eu", "myapp", []net.IP{net.ParseIP("10.0.0.1")})
+	cache.Set("prod-us", "myapp", []net.IP{net.ParseIP("10.0.1.1")})
+
+	server := NewServer(cache, ":0", "easyrun.local")
+
+	// Query without cluster → merged
+	req := new(dns.Msg)
+	req.SetQuestion("myapp.easyrun.local.", dns.TypeA)
+
+	rw := &mockResponseWriter{}
+	server.handleQuery(rw, req)
+
+	if len(rw.msg.Answer) != 2 {
+		t.Errorf("Expected 2 answers for merged query, got %d", len(rw.msg.Answer))
 	}
 }
 

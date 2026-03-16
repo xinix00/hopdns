@@ -5,48 +5,73 @@ import (
 	"sync"
 )
 
-// Cache stores job name -> IPs mapping
+// Cache stores cluster -> job name -> IPs mapping.
+// All clusters are peers — there is no "local" vs "remote" distinction.
 type Cache struct {
-	mu    sync.RWMutex
-	data  map[string][]net.IP
+	mu       sync.RWMutex
+	clusters map[string]map[string][]net.IP // cluster -> jobName -> IPs
 }
 
 // NewCache creates a new cache
 func NewCache() *Cache {
 	return &Cache{
-		data: make(map[string][]net.IP),
+		clusters: make(map[string]map[string][]net.IP),
 	}
 }
 
-// Get returns IPs for a job name
+// Get returns IPs for a job name across ALL clusters (merged)
 func (c *Cache) Get(jobName string) []net.IP {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.data[jobName]
-}
-
-// Set stores IPs for a job name
-func (c *Cache) Set(jobName string, ips []net.IP) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.data[jobName] = ips
-}
-
-// Update replaces entire cache with new data
-func (c *Cache) Update(data map[string][]net.IP) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.data = data
-}
-
-// GetAll returns all cached data
-func (c *Cache) GetAll() map[string][]net.IP {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	result := make(map[string][]net.IP)
-	for k, v := range c.data {
-		result[k] = v
+	var result []net.IP
+	for _, jobs := range c.clusters {
+		for _, ip := range jobs[jobName] {
+			// Deduplicate
+			found := false
+			for _, existing := range result {
+				if existing.Equal(ip) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				result = append(result, ip)
+			}
+		}
 	}
 	return result
+}
+
+// GetCluster returns IPs for a job name in a specific cluster
+func (c *Cache) GetCluster(cluster, jobName string) []net.IP {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if p := c.clusters[cluster]; p != nil {
+		return p[jobName]
+	}
+	return nil
+}
+
+// Set stores IPs for a job name in a cluster
+func (c *Cache) Set(cluster, jobName string, ips []net.IP) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.clusters[cluster] == nil {
+		c.clusters[cluster] = make(map[string][]net.IP)
+	}
+	c.clusters[cluster][jobName] = ips
+}
+
+// Update replaces entire cache for a cluster
+func (c *Cache) Update(cluster string, data map[string][]net.IP) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.clusters[cluster] = data
+}
+
+// Clear removes all cached data for a cluster
+func (c *Cache) Clear(cluster string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.clusters, cluster)
 }

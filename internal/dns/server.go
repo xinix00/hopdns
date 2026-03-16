@@ -2,6 +2,7 @@ package dns
 
 import (
 	"log"
+	"net"
 	"strings"
 
 	"github.com/miekg/dns"
@@ -52,7 +53,10 @@ func (s *Server) Shutdown() error {
 	return nil
 }
 
-// handleQuery handles DNS queries
+// handleQuery handles DNS queries.
+// Supports two formats:
+//   - <service>.<domain>           → merged IPs from all clusters
+//   - <service>.<cluster>.<domain> → IPs from specific cluster only
 func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 	m := new(dns.Msg)
 	m.SetReply(r)
@@ -63,24 +67,33 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 			continue
 		}
 
-		// Extract job name from query (e.g., "myapp.easyrun.local." -> "myapp")
-		jobName := strings.TrimSuffix(q.Name, "."+s.domain)
-		if jobName == q.Name {
+		// Strip domain suffix: "myapp.prod-eu.easyrun.local." → "myapp.prod-eu"
+		prefix := strings.TrimSuffix(q.Name, "."+s.domain)
+		if prefix == q.Name {
 			continue // Query doesn't match our domain
 		}
 
-		ips := s.cache.Get(jobName)
+		var ips []net.IP
+
+		// Check if there's a cluster qualifier: "myapp.prod-eu" → service="myapp", cluster="prod-eu"
+		if service, cluster, ok := strings.Cut(prefix, "."); ok {
+			// Specific cluster: <service>.<cluster>.<domain>
+			ips = s.cache.GetCluster(cluster, service)
+		} else {
+			// All clusters merged: <service>.<domain>
+			ips = s.cache.Get(prefix)
+		}
+
 		for _, ip := range ips {
-			rr := &dns.A{
+			m.Answer = append(m.Answer, &dns.A{
 				Hdr: dns.RR_Header{
 					Name:   q.Name,
 					Rrtype: dns.TypeA,
 					Class:  dns.ClassINET,
-					Ttl:    5, // Short TTL for dynamic services
+					Ttl:    5,
 				},
 				A: ip,
-			}
-			m.Answer = append(m.Answer, rr)
+			})
 		}
 	}
 

@@ -11,9 +11,9 @@ import (
 func BenchmarkCacheGet(b *testing.B) {
 	cache := NewCache()
 
-	// Populate with 50 jobs, 3 IPs each
+	// Populate with 50 jobs across 3 clusters, 3 IPs each
 	for i := 0; i < 50; i++ {
-		cache.Set(fmt.Sprintf("job-%d", i), []net.IP{
+		cache.Set("cluster-a", fmt.Sprintf("job-%d", i), []net.IP{
 			net.ParseIP(fmt.Sprintf("10.0.0.%d", i%256)),
 			net.ParseIP(fmt.Sprintf("10.0.1.%d", i%256)),
 			net.ParseIP(fmt.Sprintf("10.0.2.%d", i%256)),
@@ -36,11 +36,35 @@ func BenchmarkCacheGet(b *testing.B) {
 	}
 }
 
+func BenchmarkCacheGetMerged(b *testing.B) {
+	cache := NewCache()
+
+	// Same job in 3 clusters with different IPs
+	for c := 0; c < 3; c++ {
+		cluster := fmt.Sprintf("cluster-%d", c)
+		for i := 0; i < 50; i++ {
+			cache.Set(cluster, fmt.Sprintf("job-%d", i), []net.IP{
+				net.ParseIP(fmt.Sprintf("10.%d.0.%d", c, i%256)),
+			})
+		}
+	}
+
+	b.ResetTimer()
+	b.ReportAllocs()
+
+	for i := 0; i < b.N; i++ {
+		ips := cache.Get(fmt.Sprintf("job-%d", i%50))
+		if len(ips) != 3 {
+			b.Fatalf("expected 3 IPs, got %d", len(ips))
+		}
+	}
+}
+
 func BenchmarkConcurrentCacheGet(b *testing.B) {
 	cache := NewCache()
 
 	for i := 0; i < 50; i++ {
-		cache.Set(fmt.Sprintf("job-%d", i), []net.IP{
+		cache.Set("cluster-a", fmt.Sprintf("job-%d", i), []net.IP{
 			net.ParseIP(fmt.Sprintf("10.0.0.%d", i%256)),
 			net.ParseIP(fmt.Sprintf("10.0.1.%d", i%256)),
 			net.ParseIP(fmt.Sprintf("10.0.2.%d", i%256)),
@@ -79,7 +103,7 @@ func BenchmarkCacheSet(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		cache.Set(jobs[i%50], ips)
+		cache.Set("cluster-a", jobs[i%50], ips)
 	}
 }
 
@@ -100,31 +124,7 @@ func BenchmarkCacheUpdate(b *testing.B) {
 			b.ReportAllocs()
 
 			for i := 0; i < b.N; i++ {
-				cache.Update(data)
-			}
-		})
-	}
-}
-
-func BenchmarkCacheGetAll(b *testing.B) {
-	for _, n := range []int{10, 50, 200} {
-		b.Run(fmt.Sprintf("%d_jobs", n), func(b *testing.B) {
-			cache := NewCache()
-
-			for i := 0; i < n; i++ {
-				cache.Set(fmt.Sprintf("job-%d", i), []net.IP{
-					net.ParseIP(fmt.Sprintf("10.0.0.%d", i%256)),
-				})
-			}
-
-			b.ResetTimer()
-			b.ReportAllocs()
-
-			for i := 0; i < b.N; i++ {
-				all := cache.GetAll()
-				if len(all) != n {
-					b.Fatalf("expected %d jobs, got %d", n, len(all))
-				}
+				cache.Update("cluster-a", data)
 			}
 		})
 	}
@@ -132,7 +132,7 @@ func BenchmarkCacheGetAll(b *testing.B) {
 
 func BenchmarkHandleQuery(b *testing.B) {
 	cache := NewCache()
-	cache.Set("myapp", []net.IP{
+	cache.Set("prod", "myapp", []net.IP{
 		net.ParseIP("10.0.0.1"),
 		net.ParseIP("10.0.0.2"),
 		net.ParseIP("10.0.0.3"),
@@ -163,7 +163,7 @@ func BenchmarkHandleQueryScale(b *testing.B) {
 			for i := range ips {
 				ips[i] = net.ParseIP(fmt.Sprintf("10.0.0.%d", i+1))
 			}
-			cache.Set("myapp", ips)
+			cache.Set("prod", "myapp", ips)
 
 			server := NewServer(cache, ":0", "easyrun.local")
 			req := new(dns.Msg)
@@ -186,7 +186,7 @@ func BenchmarkHandleQueryScale(b *testing.B) {
 func BenchmarkConcurrentHandleQuery(b *testing.B) {
 	cache := NewCache()
 	for i := 0; i < 20; i++ {
-		cache.Set(fmt.Sprintf("job-%d", i), []net.IP{
+		cache.Set("prod", fmt.Sprintf("job-%d", i), []net.IP{
 			net.ParseIP(fmt.Sprintf("10.0.0.%d", i+1)),
 			net.ParseIP(fmt.Sprintf("10.0.1.%d", i+1)),
 		})
