@@ -1,11 +1,12 @@
 # easydns
 
-DNS service discovery for easyrun.
+DNS service discovery for easyrun with KISS federation.
 
 ## Features
 
 - Resolves job names to task IPs via DNS
-- **Real-time updates** via SSE (Server-Sent Events) from easyrun agent
+- **Real-time updates** via SSE (Server-Sent Events) from easyrun agents
+- **Federation** — multi-cluster DNS, every cluster is a `-peer`
 - Returns multiple A records for jobs with multiple tasks
 - Short TTL (5s) for dynamic services
 - Graceful fallback: reconnects automatically on SSE disconnect
@@ -13,42 +14,68 @@ DNS service discovery for easyrun.
 ## Usage
 
 ```bash
-./easydns -listen :5353 -agent http://127.0.0.1:8080 -domain easyrun.local
-```
+# Single cluster
+./easydns -listen :5353 -peer http://127.0.0.1:8080
 
-Runs on each node, connects to the local easyrun agent.
+# Federation: local + remote clusters (via VPN)
+./easydns -listen :5353 \
+  -peer http://127.0.0.1:8080 \
+  -peer http://10.0.1.100:8080 \
+  -peer http://10.0.2.100:8080
+```
 
 ## Flags
 
 - `-listen` - DNS address to listen on (default `:5353`, use `:53` for standard DNS)
-- `-agent` - Local easyrun agent address (default `http://127.0.0.1:8080`)
+- `-peer` - Cluster agent endpoint (repeatable, at least one required)
 - `-domain` - DNS domain suffix (default `easyrun.local`)
+- `-api-key` - API key for easyrun agent authentication
 
 ## How it works
 
-1. Connects to local easyrun agent via SSE (`/v1/events`)
-2. Receives real-time notifications when jobs or tasks change
-3. Fetches updated state and rebuilds cache: job name -> list of IPs
-4. Only includes tasks in `running` state
-5. Returns all IPs as A records (client can choose)
+1. Connects to each peer via SSE (`/v1/events`)
+2. Discovers cluster name from peer's `GET /v1/status` → `cluster_name`
+3. Receives real-time notifications when jobs or tasks change
+4. Fetches updated state and rebuilds cache per cluster: job name → list of IPs
+5. Only includes tasks in `running` state
+6. Returns all IPs as A records
+
+## DNS Resolution
+
+```bash
+# All clusters merged
+dig @localhost -p 5353 myapp.easyrun.local
+
+# Specific cluster only
+dig @localhost -p 5353 myapp.prod-eu.easyrun.local
+```
+
+| Query | Resolves to |
+|-------|-------------|
+| `myapp.easyrun.local` | IPs from **all** peers merged |
+| `myapp.prod-eu.easyrun.local` | IPs from cluster "prod-eu" only |
 
 ## Example
 
 ```bash
-# Start easydns
-./easydns -listen :5353
+# Start easydns with 2 clusters
+./easydns -listen :5353 \
+  -peer http://127.0.0.1:8080 \
+  -peer http://10.0.1.100:8080
 
-# Query a job
+# Query a job (merged across all clusters)
 dig @localhost -p 5353 myapp.easyrun.local
-
-# Returns:
 # myapp.easyrun.local.  5  IN  A  192.168.1.10
-# myapp.easyrun.local.  5  IN  A  192.168.1.20
+# myapp.easyrun.local.  5  IN  A  10.0.1.20
+
+# Query a job in specific cluster
+dig @localhost -p 5353 myapp.prod-eu.easyrun.local
+# myapp.prod-eu.easyrun.local.  5  IN  A  192.168.1.10
 ```
 
 ## Cache behavior
 
-- Cache is updated in real-time via SSE events
-- If agent is unreachable, serves stale cache
-- Automatically reconnects on SSE disconnect
-- This ensures DNS availability even during brief outages
+- Cache is updated in real-time via SSE events per peer
+- If a peer is unreachable, its cache is cleared (other peers unaffected)
+- Automatically reconnects and re-discovers cluster name on SSE disconnect
+- Duplicate IPs across clusters are deduplicated in merged queries
