@@ -5,6 +5,7 @@ import (
 	"net"
 	"testing"
 
+	"easylib"
 	"github.com/miekg/dns"
 )
 
@@ -242,7 +243,7 @@ func BenchmarkParseJobFromData(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		job := parseJobFromData(lines[i%len(lines)])
+		job := easylib.ParseJobFromSSE(lines[i%len(lines)])
 		if job == "" {
 			b.Fatal("expected non-empty job")
 		}

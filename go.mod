@@ -4,7 +4,12 @@ go 1.24.0
 
 toolchain go1.24.3
 
-require github.com/miekg/dns v1.1.72
+require (
+	easylib v0.0.0
+	github.com/miekg/dns v1.1.72
+)
+
+replace easylib => ../easylib
 
 require (
 	golang.org/x/mod v0.31.0 // indirect

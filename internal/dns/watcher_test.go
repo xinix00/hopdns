@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"easylib"
 )
 
 func TestWatcherRefresh(t *testing.T) {
@@ -16,7 +18,7 @@ func TestWatcherRefresh(t *testing.T) {
 
 	// Mock /v1/agents endpoint
 	mux.HandleFunc("/v1/agents", func(w http.ResponseWriter, r *http.Request) {
-		agents := []Agent{
+		agents := []easylib.Agent{
 			{ID: "agent1", Endpoint: serverURL},
 		}
 		_ = json.NewEncoder(w).Encode(agents)
@@ -28,7 +30,7 @@ func TestWatcherRefresh(t *testing.T) {
 			"cluster_name": "test-cluster",
 			"agents":       1,
 			"total_tasks":  3,
-			"tasks_by_agent": map[string][]Task{
+			"tasks_by_agent": map[string][]easylib.Task{
 				"agent1": {
 					{ID: "task1", JobName: "myapp", State: "running"},
 					{ID: "task2", JobName: "myapp", State: "running"},
@@ -101,14 +103,14 @@ func TestExtractIPInvalid(t *testing.T) {
 func TestWatcherNoAgents(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/agents", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode([]Agent{})
+		_ = json.NewEncoder(w).Encode([]easylib.Agent{})
 	})
 	mux.HandleFunc("/v1/status", func(w http.ResponseWriter, r *http.Request) {
 		status := map[string]any{
 			"cluster_name":   "test-cluster",
 			"agents":         0,
 			"total_tasks":    0,
-			"tasks_by_agent": map[string][]Task{},
+			"tasks_by_agent": map[string][]easylib.Task{},
 		}
 		_ = json.NewEncoder(w).Encode(status)
 	})

@@ -3,7 +3,6 @@ package dns
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"net"
@@ -11,29 +10,17 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"easylib"
 )
-
-// Task represents an easyrun task
-type Task struct {
-	ID      string `json:"id"`
-	JobName string `json:"job_name"`
-	State   string `json:"state"`
-}
-
-// Agent represents an easyrun agent
-type Agent struct {
-	ID       string `json:"id"`
-	Endpoint string `json:"endpoint"`
-}
 
 // Watcher watches an easyrun cluster via SSE and keeps the cache updated.
 // Every cluster (including your own) is a peer — there is no special "local" watcher.
 type Watcher struct {
 	agentAddr string
 	cache     *Cache
-	client    *http.Client
+	client    *easylib.Client
 	interval  time.Duration
-	apiKey    string
 	cluster   string // discovered from /v1/status → cluster_name
 }
 
@@ -42,22 +29,9 @@ func NewWatcher(agentAddr string, cache *Cache, apiKey string) *Watcher {
 	return &Watcher{
 		agentAddr: agentAddr,
 		cache:     cache,
-		client:    &http.Client{Timeout: 10 * time.Second},
+		client:    easylib.NewClient(apiKey),
 		interval:  5 * time.Second,
-		apiKey:    apiKey,
 	}
-}
-
-// get performs a GET request with API key authentication
-func (w *Watcher) get(url string) (*http.Response, error) {
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
-		return nil, err
-	}
-	if w.apiKey != "" {
-		req.Header.Set("X-API-Key", w.apiKey)
-	}
-	return w.client.Do(req)
 }
 
 // Run discovers the cluster name and then watches SSE for state changes.
@@ -106,16 +80,10 @@ func (w *Watcher) Run(ctx context.Context) {
 
 // discoverCluster fetches /v1/status and extracts cluster_name
 func (w *Watcher) discoverCluster() (string, error) {
-	resp, err := w.get(w.agentAddr + "/v1/status")
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	var status struct {
+	status, err := easylib.Fetch[struct {
 		ClusterName string `json:"cluster_name"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+	}](w.client, w.agentAddr+"/v1/status")
+	if err != nil {
 		return "", err
 	}
 	if status.ClusterName == "" {
@@ -131,8 +99,8 @@ func (w *Watcher) watchSSE(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if w.apiKey != "" {
-		req.Header.Set("X-API-Key", w.apiKey)
+	if w.client.APIKey != "" {
+		req.Header.Set("X-API-Key", w.client.APIKey)
 	}
 
 	resp, err := (&http.Client{}).Do(req) // no timeout — SSE is long-lived
@@ -172,8 +140,7 @@ func (w *Watcher) watchSSE(ctx context.Context) error {
 				return nil // stream closed
 			}
 			if strings.HasPrefix(line, "data:") {
-				job := parseJobFromData(line)
-				if job != "" {
+				if job := easylib.ParseJobFromSSE(line); job != "" {
 					if len(pending) == 0 {
 						debounce.Reset(500 * time.Millisecond)
 					}
@@ -189,53 +156,19 @@ func (w *Watcher) watchSSE(ctx context.Context) error {
 	}
 }
 
-// parseJobFromData extracts the job name from an SSE data line.
-// Handles both job events ({"name":"..."}) and task events ({"job":"...","event":"..."}).
-func parseJobFromData(line string) string {
-	data := strings.TrimPrefix(line, "data:")
-	data = strings.TrimSpace(data)
-	var ev struct {
-		Name string `json:"name"`
-		Job  string `json:"job"`
-	}
-	_ = json.Unmarshal([]byte(data), &ev)
-	if ev.Name != "" {
-		return ev.Name
-	}
-	return ev.Job
-}
-
 // refreshJob fetches status for a single job and updates the cache.
 func (w *Watcher) refreshJob(jobName string) {
-	resp, err := w.get(fmt.Sprintf("%s/v1/jobs/%s/status", w.agentAddr, jobName))
+	status, err := easylib.Fetch[struct {
+		Agents       []easylib.Agent            `json:"agents"`
+		TasksByAgent map[string][]easylib.Task   `json:"tasks_by_agent"`
+	}](w.client, fmt.Sprintf("%s/v1/jobs/%s/status", w.agentAddr, jobName))
 	if err != nil {
 		log.Printf("[%s] (%s) failed to fetch job %s: %v", w.agentAddr, w.cluster, jobName, err)
 		w.refresh()
 		return
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		w.refresh()
-		return
-	}
-
-	var status struct {
-		Agents       []Agent           `json:"agents"`
-		TasksByAgent map[string][]Task `json:"tasks_by_agent"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
-		w.refresh()
-		return
-	}
-
-	agentIPs := make(map[string]net.IP)
-	for _, agent := range status.Agents {
-		if ip := extractIP(agent.Endpoint); ip != nil {
-			agentIPs[agent.ID] = ip
-		}
-	}
-
+	agentIPs := buildAgentIPs(status.Agents)
 	var ips []net.IP
 	for agentID, tasks := range status.TasksByAgent {
 		ip := agentIPs[agentID]
@@ -243,18 +176,8 @@ func (w *Watcher) refreshJob(jobName string) {
 			continue
 		}
 		for _, task := range tasks {
-			if task.State != "running" {
-				continue
-			}
-			found := false
-			for _, existing := range ips {
-				if existing.Equal(ip) {
-					found = true
-					break
-				}
-			}
-			if !found {
-				ips = append(ips, ip)
+			if task.State == "running" {
+				ips = appendUniqIP(ips, ip)
 			}
 		}
 	}
@@ -265,44 +188,31 @@ func (w *Watcher) refreshJob(jobName string) {
 
 // refresh fetches all data and updates the entire cache for this cluster.
 func (w *Watcher) refresh() {
-	agents, err := w.fetchAgents()
+	agents, err := easylib.Fetch[[]easylib.Agent](w.client, w.agentAddr+"/v1/agents")
 	if err != nil {
 		log.Printf("[%s] (%s) failed to fetch agents: %v", w.agentAddr, w.cluster, err)
 		return
 	}
 
-	agentIPs := make(map[string]net.IP)
-	for _, agent := range agents {
-		if ip := extractIP(agent.Endpoint); ip != nil {
-			agentIPs[agent.ID] = ip
-		}
-	}
+	agentIPs := buildAgentIPs(agents)
 
-	status, err := w.fetchClusterStatus()
+	status, err := easylib.Fetch[struct {
+		TasksByAgent map[string][]easylib.Task `json:"tasks_by_agent"`
+	}](w.client, w.agentAddr+"/v1/status")
 	if err != nil {
 		log.Printf("[%s] (%s) failed to fetch status: %v", w.agentAddr, w.cluster, err)
 		return
 	}
 
 	data := make(map[string][]net.IP)
-	for agentID, tasks := range status {
+	for agentID, tasks := range status.TasksByAgent {
 		ip := agentIPs[agentID]
 		if ip == nil {
 			continue
 		}
 		for _, task := range tasks {
-			if task.State != "running" {
-				continue
-			}
-			found := false
-			for _, existingIP := range data[task.JobName] {
-				if existingIP.Equal(ip) {
-					found = true
-					break
-				}
-			}
-			if !found {
-				data[task.JobName] = append(data[task.JobName], ip)
+			if task.State == "running" {
+				data[task.JobName] = appendUniqIP(data[task.JobName], ip)
 			}
 		}
 	}
@@ -311,34 +221,24 @@ func (w *Watcher) refresh() {
 	log.Printf("[%s] (%s) cache updated: %d jobs", w.agentAddr, w.cluster, len(data))
 }
 
-func (w *Watcher) fetchAgents() ([]Agent, error) {
-	resp, err := w.get(w.agentAddr + "/v1/agents")
-	if err != nil {
-		return nil, err
+func buildAgentIPs(agents []easylib.Agent) map[string]net.IP {
+	ips := make(map[string]net.IP)
+	for _, agent := range agents {
+		if ip := extractIP(agent.Endpoint); ip != nil {
+			ips[agent.ID] = ip
+		}
 	}
-	defer resp.Body.Close()
-
-	var agents []Agent
-	if err := json.NewDecoder(resp.Body).Decode(&agents); err != nil {
-		return nil, err
-	}
-	return agents, nil
+	return ips
 }
 
-func (w *Watcher) fetchClusterStatus() (map[string][]Task, error) {
-	resp, err := w.get(w.agentAddr + "/v1/status")
-	if err != nil {
-		return nil, err
+// appendUniqIP appends ip to list if not already present
+func appendUniqIP(list []net.IP, ip net.IP) []net.IP {
+	for _, existing := range list {
+		if existing.Equal(ip) {
+			return list
+		}
 	}
-	defer resp.Body.Close()
-
-	var status struct {
-		TasksByAgent map[string][]Task `json:"tasks_by_agent"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
-		return nil, err
-	}
-	return status.TasksByAgent, nil
+	return append(list, ip)
 }
 
 // extractIP extracts IP from endpoint (http://ip:port -> ip)
@@ -347,6 +247,5 @@ func extractIP(endpoint string) net.IP {
 	if err != nil {
 		return nil
 	}
-	host := u.Hostname()
-	return net.ParseIP(host)
+	return net.ParseIP(u.Hostname())
 }
