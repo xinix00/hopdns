@@ -22,7 +22,7 @@ func (s *stringSlice) Set(value string) error {
 }
 
 func main() {
-	listenAddr := flag.String("listen", ":5353", "DNS address to listen on (use :53 for standard DNS)")
+	listenAddr := flag.String("listen", ":8053", "DNS address to listen on")
 	domain := flag.String("domain", "internal", "DNS domain suffix")
 	apiKey := flag.String("api-key", "", "API key for easyrun agent authentication")
 	var peers stringSlice
