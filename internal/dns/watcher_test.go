@@ -53,19 +53,13 @@ func TestWatcherRefresh(t *testing.T) {
 	watcher.refresh()
 
 	// Check cache - should have 127.0.0.1 for myapp
-	ips := cache.Get("myapp")
+	ips := cache.GetCluster("test-cluster", "myapp")
 	if len(ips) != 1 {
 		t.Errorf("Expected 1 IP for myapp, got %d", len(ips))
 	}
 
-	// Cluster-specific lookup should also work
-	ips = cache.GetCluster("test-cluster", "myapp")
-	if len(ips) != 1 {
-		t.Errorf("Expected 1 IP for cluster-specific myapp, got %d", len(ips))
-	}
-
 	// "other" is stopped, should not be in cache
-	otherIPs := cache.Get("other")
+	otherIPs := cache.GetCluster("test-cluster", "other")
 	if len(otherIPs) != 0 {
 		t.Errorf("Expected no IPs for stopped job, got %d", len(otherIPs))
 	}

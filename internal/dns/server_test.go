@@ -13,13 +13,11 @@ func TestServerHandleQuery(t *testing.T) {
 
 	server := NewServer(cache, ":0", "easyrun.local")
 
-	// Create a mock DNS request
+	// Query: service.cluster.domain
 	req := new(dns.Msg)
-	req.SetQuestion("myapp.easyrun.local.", dns.TypeA)
+	req.SetQuestion("myapp.prod.easyrun.local.", dns.TypeA)
 
-	// Create a mock response writer
 	rw := &mockResponseWriter{}
-
 	server.handleQuery(rw, req)
 
 	if rw.msg == nil {
@@ -42,18 +40,21 @@ func TestServerHandleQuery(t *testing.T) {
 	}
 }
 
-func TestServerHandleQueryNoMatch(t *testing.T) {
+func TestServerHandleQueryNoCluster(t *testing.T) {
 	cache := NewCache()
+	cache.Set("prod", "myapp", []net.IP{net.ParseIP("192.168.1.10")})
+
 	server := NewServer(cache, ":0", "easyrun.local")
 
+	// Query without cluster qualifier → should return 0 (not supported)
 	req := new(dns.Msg)
-	req.SetQuestion("unknown.easyrun.local.", dns.TypeA)
+	req.SetQuestion("myapp.easyrun.local.", dns.TypeA)
 
 	rw := &mockResponseWriter{}
 	server.handleQuery(rw, req)
 
 	if len(rw.msg.Answer) != 0 {
-		t.Errorf("Expected 0 answers for unknown job, got %d", len(rw.msg.Answer))
+		t.Errorf("Expected 0 answers for query without cluster, got %d", len(rw.msg.Answer))
 	}
 }
 
@@ -98,22 +99,35 @@ func TestServerHandleQueryClusterSpecific(t *testing.T) {
 	}
 }
 
-func TestServerHandleQueryMergedClusters(t *testing.T) {
+func TestServerHandleQueryDifferentClusters(t *testing.T) {
 	cache := NewCache()
 	cache.Set("prod-eu", "myapp", []net.IP{net.ParseIP("10.0.0.1")})
 	cache.Set("prod-us", "myapp", []net.IP{net.ParseIP("10.0.1.1")})
 
 	server := NewServer(cache, ":0", "easyrun.local")
 
-	// Query without cluster → merged
+	// prod-eu → only eu IP
 	req := new(dns.Msg)
-	req.SetQuestion("myapp.easyrun.local.", dns.TypeA)
-
+	req.SetQuestion("myapp.prod-eu.easyrun.local.", dns.TypeA)
 	rw := &mockResponseWriter{}
 	server.handleQuery(rw, req)
+	if len(rw.msg.Answer) != 1 {
+		t.Fatalf("prod-eu: expected 1, got %d", len(rw.msg.Answer))
+	}
+	if rw.msg.Answer[0].(*dns.A).A.String() != "10.0.0.1" {
+		t.Errorf("prod-eu: expected 10.0.0.1, got %s", rw.msg.Answer[0].(*dns.A).A.String())
+	}
 
-	if len(rw.msg.Answer) != 2 {
-		t.Errorf("Expected 2 answers for merged query, got %d", len(rw.msg.Answer))
+	// prod-us → only us IP
+	req2 := new(dns.Msg)
+	req2.SetQuestion("myapp.prod-us.easyrun.local.", dns.TypeA)
+	rw2 := &mockResponseWriter{}
+	server.handleQuery(rw2, req2)
+	if len(rw2.msg.Answer) != 1 {
+		t.Fatalf("prod-us: expected 1, got %d", len(rw2.msg.Answer))
+	}
+	if rw2.msg.Answer[0].(*dns.A).A.String() != "10.0.1.1" {
+		t.Errorf("prod-us: expected 10.0.1.1, got %s", rw2.msg.Answer[0].(*dns.A).A.String())
 	}
 }
 

@@ -30,14 +30,14 @@ func BenchmarkCacheGet(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		ips := cache.Get(jobs[i%50])
+		ips := cache.GetCluster("cluster-a",jobs[i%50])
 		if len(ips) != 3 {
 			b.Fatalf("expected 3 IPs, got %d", len(ips))
 		}
 	}
 }
 
-func BenchmarkCacheGetMerged(b *testing.B) {
+func BenchmarkCacheGetClusterSpecific(b *testing.B) {
 	cache := NewCache()
 
 	// Same job in 3 clusters with different IPs
@@ -54,9 +54,9 @@ func BenchmarkCacheGetMerged(b *testing.B) {
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		ips := cache.Get(fmt.Sprintf("job-%d", i%50))
-		if len(ips) != 3 {
-			b.Fatalf("expected 3 IPs, got %d", len(ips))
+		ips := cache.GetCluster("cluster-0", fmt.Sprintf("job-%d", i%50))
+		if len(ips) != 1 {
+			b.Fatalf("expected 1 IP, got %d", len(ips))
 		}
 	}
 }
@@ -78,7 +78,7 @@ func BenchmarkConcurrentCacheGet(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		i := 0
 		for pb.Next() {
-			ips := cache.Get(fmt.Sprintf("job-%d", i%50))
+			ips := cache.GetCluster("cluster-a",fmt.Sprintf("job-%d", i%50))
 			if len(ips) != 3 {
 				b.Fatalf("expected 3 IPs, got %d", len(ips))
 			}

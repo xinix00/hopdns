@@ -2,7 +2,6 @@ package dns
 
 import (
 	"log"
-	"net"
 	"strings"
 
 	"github.com/miekg/dns"
@@ -54,9 +53,8 @@ func (s *Server) Shutdown() error {
 }
 
 // handleQuery handles DNS queries.
-// Supports two formats:
-//   - <service>.<domain>           → merged IPs from all clusters
-//   - <service>.<cluster>.<domain> → IPs from specific cluster only
+// Format: <service>.<cluster>.<domain> → IPs from that cluster
+// Example: myapp.prod-eu.easyrun.local → IPs for "myapp" in cluster "prod-eu"
 func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 	m := new(dns.Msg)
 	m.SetReply(r)
@@ -73,16 +71,12 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 			continue // Query doesn't match our domain
 		}
 
-		var ips []net.IP
-
-		// Check if there's a cluster qualifier: "myapp.prod-eu" → service="myapp", cluster="prod-eu"
-		if service, cluster, ok := strings.Cut(prefix, "."); ok {
-			// Specific cluster: <service>.<cluster>.<domain>
-			ips = s.cache.GetCluster(cluster, service)
-		} else {
-			// All clusters merged: <service>.<domain>
-			ips = s.cache.Get(prefix)
+		// Parse: "myapp.prod-eu" → service="myapp", cluster="prod-eu"
+		service, cluster, ok := strings.Cut(prefix, ".")
+		if !ok {
+			continue // No cluster qualifier — ignore
 		}
+		ips := s.cache.GetCluster(cluster, service)
 
 		for _, ip := range ips {
 			m.Answer = append(m.Answer, &dns.A{

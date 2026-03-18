@@ -6,7 +6,6 @@ import (
 )
 
 // Cache stores cluster -> job name -> IPs mapping.
-// All clusters are peers — there is no "local" vs "remote" distinction.
 type Cache struct {
 	mu       sync.RWMutex
 	clusters map[string]map[string][]net.IP // cluster -> jobName -> IPs
@@ -17,29 +16,6 @@ func NewCache() *Cache {
 	return &Cache{
 		clusters: make(map[string]map[string][]net.IP),
 	}
-}
-
-// Get returns IPs for a job name across ALL clusters (merged)
-func (c *Cache) Get(jobName string) []net.IP {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	var result []net.IP
-	for _, jobs := range c.clusters {
-		for _, ip := range jobs[jobName] {
-			// Deduplicate
-			found := false
-			for _, existing := range result {
-				if existing.Equal(ip) {
-					found = true
-					break
-				}
-			}
-			if !found {
-				result = append(result, ip)
-			}
-		}
-	}
-	return result
 }
 
 // GetCluster returns IPs for a job name in a specific cluster
