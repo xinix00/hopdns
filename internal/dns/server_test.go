@@ -11,11 +11,11 @@ func TestServerHandleQuery(t *testing.T) {
 	cache := NewCache()
 	cache.Set("prod", "myapp", []net.IP{net.ParseIP("192.168.1.10"), net.ParseIP("192.168.1.20")})
 
-	server := NewServer(cache, ":0", "easyrun.local")
+	server := NewServer(cache, ":0", "internal")
 
 	// Query: service.cluster.domain
 	req := new(dns.Msg)
-	req.SetQuestion("myapp.prod.easyrun.local.", dns.TypeA)
+	req.SetQuestion("myapp.prod.internal.", dns.TypeA)
 
 	rw := &mockResponseWriter{}
 	server.handleQuery(rw, req)
@@ -44,11 +44,11 @@ func TestServerHandleQueryNoCluster(t *testing.T) {
 	cache := NewCache()
 	cache.Set("prod", "myapp", []net.IP{net.ParseIP("192.168.1.10")})
 
-	server := NewServer(cache, ":0", "easyrun.local")
+	server := NewServer(cache, ":0", "internal")
 
 	// Query without cluster qualifier → should return 0 (not supported)
 	req := new(dns.Msg)
-	req.SetQuestion("myapp.easyrun.local.", dns.TypeA)
+	req.SetQuestion("myapp.internal.", dns.TypeA)
 
 	rw := &mockResponseWriter{}
 	server.handleQuery(rw, req)
@@ -62,10 +62,10 @@ func TestServerHandleQueryWrongDomain(t *testing.T) {
 	cache := NewCache()
 	cache.Set("prod", "myapp", []net.IP{net.ParseIP("192.168.1.10")})
 
-	server := NewServer(cache, ":0", "easyrun.local")
+	server := NewServer(cache, ":0", "internal")
 
 	req := new(dns.Msg)
-	req.SetQuestion("myapp.other.local.", dns.TypeA)
+	req.SetQuestion("myapp.other.example.", dns.TypeA)
 
 	rw := &mockResponseWriter{}
 	server.handleQuery(rw, req)
@@ -80,11 +80,11 @@ func TestServerHandleQueryClusterSpecific(t *testing.T) {
 	cache.Set("prod-eu", "myapp", []net.IP{net.ParseIP("10.0.0.1")})
 	cache.Set("prod-us", "myapp", []net.IP{net.ParseIP("10.0.1.1")})
 
-	server := NewServer(cache, ":0", "easyrun.local")
+	server := NewServer(cache, ":0", "internal")
 
 	// Query specific cluster
 	req := new(dns.Msg)
-	req.SetQuestion("myapp.prod-eu.easyrun.local.", dns.TypeA)
+	req.SetQuestion("myapp.prod-eu.internal.", dns.TypeA)
 
 	rw := &mockResponseWriter{}
 	server.handleQuery(rw, req)
@@ -104,11 +104,11 @@ func TestServerHandleQueryDifferentClusters(t *testing.T) {
 	cache.Set("prod-eu", "myapp", []net.IP{net.ParseIP("10.0.0.1")})
 	cache.Set("prod-us", "myapp", []net.IP{net.ParseIP("10.0.1.1")})
 
-	server := NewServer(cache, ":0", "easyrun.local")
+	server := NewServer(cache, ":0", "internal")
 
 	// prod-eu → only eu IP
 	req := new(dns.Msg)
-	req.SetQuestion("myapp.prod-eu.easyrun.local.", dns.TypeA)
+	req.SetQuestion("myapp.prod-eu.internal.", dns.TypeA)
 	rw := &mockResponseWriter{}
 	server.handleQuery(rw, req)
 	if len(rw.msg.Answer) != 1 {
@@ -120,7 +120,7 @@ func TestServerHandleQueryDifferentClusters(t *testing.T) {
 
 	// prod-us → only us IP
 	req2 := new(dns.Msg)
-	req2.SetQuestion("myapp.prod-us.easyrun.local.", dns.TypeA)
+	req2.SetQuestion("myapp.prod-us.internal.", dns.TypeA)
 	rw2 := &mockResponseWriter{}
 	server.handleQuery(rw2, req2)
 	if len(rw2.msg.Answer) != 1 {

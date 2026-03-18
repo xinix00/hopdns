@@ -18,7 +18,7 @@ type Server struct {
 // NewServer creates a new DNS server
 func NewServer(cache *Cache, addr, domain string) *Server {
 	if domain == "" {
-		domain = "easyrun.local."
+		domain = "internal."
 	}
 	if !strings.HasSuffix(domain, ".") {
 		domain += "."

@@ -139,10 +139,10 @@ func BenchmarkHandleQuery(b *testing.B) {
 		net.ParseIP("10.0.0.3"),
 	})
 
-	server := NewServer(cache, ":0", "easyrun.local")
+	server := NewServer(cache, ":0", "internal")
 
 	req := new(dns.Msg)
-	req.SetQuestion("myapp.easyrun.local.", dns.TypeA)
+	req.SetQuestion("myapp.internal.", dns.TypeA)
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -166,9 +166,9 @@ func BenchmarkHandleQueryScale(b *testing.B) {
 			}
 			cache.Set("prod", "myapp", ips)
 
-			server := NewServer(cache, ":0", "easyrun.local")
+			server := NewServer(cache, ":0", "internal")
 			req := new(dns.Msg)
-			req.SetQuestion("myapp.easyrun.local.", dns.TypeA)
+			req.SetQuestion("myapp.internal.", dns.TypeA)
 
 			b.ResetTimer()
 			b.ReportAllocs()
@@ -193,7 +193,7 @@ func BenchmarkConcurrentHandleQuery(b *testing.B) {
 		})
 	}
 
-	server := NewServer(cache, ":0", "easyrun.local")
+	server := NewServer(cache, ":0", "internal")
 
 	b.ResetTimer()
 	b.ReportAllocs()
@@ -202,7 +202,7 @@ func BenchmarkConcurrentHandleQuery(b *testing.B) {
 		i := 0
 		for pb.Next() {
 			req := new(dns.Msg)
-			req.SetQuestion(fmt.Sprintf("job-%d.easyrun.local.", i%20), dns.TypeA)
+			req.SetQuestion(fmt.Sprintf("job-%d.internal.", i%20), dns.TypeA)
 			rw := &mockResponseWriter{}
 			server.handleQuery(rw, req)
 			if len(rw.msg.Answer) != 2 {

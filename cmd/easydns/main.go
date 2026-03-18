@@ -23,7 +23,7 @@ func (s *stringSlice) Set(value string) error {
 
 func main() {
 	listenAddr := flag.String("listen", ":5353", "DNS address to listen on (use :53 for standard DNS)")
-	domain := flag.String("domain", "easyrun.local", "DNS domain suffix")
+	domain := flag.String("domain", "internal", "DNS domain suffix")
 	apiKey := flag.String("api-key", "", "API key for easyrun agent authentication")
 	var peers stringSlice
 	flag.Var(&peers, "peer", "Cluster agent endpoint (repeatable, e.g., -peer http://127.0.0.1:8080 -peer http://10.0.1.100:8080)")
