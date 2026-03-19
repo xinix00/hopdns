@@ -11,34 +11,37 @@ import (
 )
 
 func TestWatcherRefresh(t *testing.T) {
-	// Mock easyrun agent
 	mux := http.NewServeMux()
-
 	var serverURL string
 
-	// Mock /v1/agents endpoint
-	mux.HandleFunc("/v1/agents", func(w http.ResponseWriter, r *http.Request) {
-		agents := []easylib.Agent{
-			{ID: "agent1", Endpoint: serverURL},
-		}
-		_ = json.NewEncoder(w).Encode(agents)
+	mux.HandleFunc("/v1/jobs", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]easylib.Job{
+			{Name: "myapp"},
+			{Name: "other"},
+		})
 	})
 
-	// Mock /v1/status endpoint (includes cluster_name for discovery)
-	mux.HandleFunc("/v1/status", func(w http.ResponseWriter, r *http.Request) {
-		status := map[string]any{
-			"cluster_name": "test-cluster",
-			"agents":       1,
-			"total_tasks":  3,
+	mux.HandleFunc("/v1/jobs/myapp/status", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"agents": []easylib.Agent{{ID: "agent1", Endpoint: serverURL}},
 			"tasks_by_agent": map[string][]easylib.Task{
 				"agent1": {
 					{ID: "task1", JobName: "myapp", State: "running"},
 					{ID: "task2", JobName: "myapp", State: "running"},
+				},
+			},
+		})
+	})
+
+	mux.HandleFunc("/v1/jobs/other/status", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"agents": []easylib.Agent{{ID: "agent1", Endpoint: serverURL}},
+			"tasks_by_agent": map[string][]easylib.Task{
+				"agent1": {
 					{ID: "task3", JobName: "other", State: "stopped"},
 				},
 			},
-		}
-		_ = json.NewEncoder(w).Encode(status)
+		})
 	})
 
 	server := httptest.NewServer(mux)
@@ -47,18 +50,15 @@ func TestWatcherRefresh(t *testing.T) {
 
 	cache := NewCache()
 	watcher := NewWatcher(server.URL, cache, "")
-	watcher.cluster = "test-cluster" // pre-set for refresh test
+	watcher.cluster = "test-cluster"
 
-	// Manually trigger refresh
 	watcher.refresh()
 
-	// Check cache - should have 127.0.0.1 for myapp
 	ips := cache.GetCluster("test-cluster", "myapp")
 	if len(ips) != 1 {
 		t.Errorf("Expected 1 IP for myapp, got %d", len(ips))
 	}
 
-	// "other" is stopped, should not be in cache
 	otherIPs := cache.GetCluster("test-cluster", "other")
 	if len(otherIPs) != 0 {
 		t.Errorf("Expected no IPs for stopped job, got %d", len(otherIPs))
@@ -96,33 +96,23 @@ func TestExtractIPInvalid(t *testing.T) {
 
 func TestWatcherNoAgents(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/agents", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode([]easylib.Agent{})
-	})
-	mux.HandleFunc("/v1/status", func(w http.ResponseWriter, r *http.Request) {
-		status := map[string]any{
-			"cluster_name":   "test-cluster",
-			"agents":         0,
-			"total_tasks":    0,
-			"tasks_by_agent": map[string][]easylib.Task{},
-		}
-		_ = json.NewEncoder(w).Encode(status)
+	mux.HandleFunc("/v1/jobs", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode([]easylib.Job{})
 	})
 
 	server := httptest.NewServer(mux)
 	defer server.Close()
 
 	cache := NewCache()
-	// Pre-populate cache
 	cache.Set("test-cluster", "oldapp", []net.IP{net.ParseIP("10.0.0.1")})
 
 	watcher := NewWatcher(server.URL, cache, "")
 	watcher.cluster = "test-cluster"
 	watcher.refresh()
 
-	// Cache should be cleared since no agents
+	// Cache should be cleared since no jobs
 	if ips := cache.GetCluster("test-cluster", "oldapp"); len(ips) != 0 {
-		t.Error("Cache should be empty after refresh with no agents")
+		t.Error("Cache should be empty after refresh with no jobs")
 	}
 }
 

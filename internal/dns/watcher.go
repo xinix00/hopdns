@@ -186,33 +186,35 @@ func (w *Watcher) refreshJob(jobName string) {
 	log.Printf("[%s] (%s) cache updated job %s: %d IPs", w.agentAddr, w.cluster, jobName, len(ips))
 }
 
-// refresh fetches all data and updates the entire cache for this cluster.
+// refresh fetches all jobs and their task status, then updates the cache.
 func (w *Watcher) refresh() {
-	agents, err := easylib.Fetch[[]easylib.Agent](w.client, w.agentAddr+"/v1/agents")
+	jobs, err := easylib.Fetch[[]easylib.Job](w.client, w.agentAddr+"/v1/jobs")
 	if err != nil {
-		log.Printf("[%s] (%s) failed to fetch agents: %v", w.agentAddr, w.cluster, err)
-		return
-	}
-
-	agentIPs := buildAgentIPs(agents)
-
-	status, err := easylib.Fetch[struct {
-		TasksByAgent map[string][]easylib.Task `json:"tasks_by_agent"`
-	}](w.client, w.agentAddr+"/v1/status")
-	if err != nil {
-		log.Printf("[%s] (%s) failed to fetch status: %v", w.agentAddr, w.cluster, err)
+		log.Printf("[%s] (%s) failed to fetch jobs: %v", w.agentAddr, w.cluster, err)
 		return
 	}
 
 	data := make(map[string][]net.IP)
-	for agentID, tasks := range status.TasksByAgent {
-		ip := agentIPs[agentID]
-		if ip == nil {
+	for _, job := range jobs {
+		status, err := easylib.Fetch[struct {
+			Agents       []easylib.Agent          `json:"agents"`
+			TasksByAgent map[string][]easylib.Task `json:"tasks_by_agent"`
+		}](w.client, fmt.Sprintf("%s/v1/jobs/%s/status", w.agentAddr, job.Name))
+		if err != nil {
+			log.Printf("[%s] (%s) failed to fetch job %s: %v", w.agentAddr, w.cluster, job.Name, err)
 			continue
 		}
-		for _, task := range tasks {
-			if task.State == "running" {
-				data[task.JobName] = appendUniqIP(data[task.JobName], ip)
+
+		agentIPs := buildAgentIPs(status.Agents)
+		for agentID, tasks := range status.TasksByAgent {
+			ip := agentIPs[agentID]
+			if ip == nil {
+				continue
+			}
+			for _, task := range tasks {
+				if task.State == "running" {
+					data[job.Name] = appendUniqIP(data[job.Name], ip)
+				}
 			}
 		}
 	}
