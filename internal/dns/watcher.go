@@ -113,8 +113,8 @@ func (w *Watcher) watchSSE(ctx context.Context) error {
 		return &url.Error{Op: "GET", URL: w.agentAddr + "/v1/events", Err: http.ErrNotSupported}
 	}
 
-	w.refresh() // seed cache on (re)connect
-	log.Printf("[%s] (%s) SSE connected", w.agentAddr, w.cluster)
+	log.Printf("[%s] (%s) SSE connected, seeding cache", w.agentAddr, w.cluster)
+	w.refresh() // seed cache — SSE stream already open, events buffered
 
 	lineCh := make(chan string)
 	go func() {

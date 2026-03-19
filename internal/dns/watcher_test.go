@@ -1,11 +1,15 @@
 package dns
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"time"
 
 	"easylib"
 )
@@ -157,5 +161,377 @@ func TestWatcherDiscoverClusterMissing(t *testing.T) {
 	_, err := watcher.discoverCluster()
 	if err == nil {
 		t.Fatal("discoverCluster() should fail when cluster_name is missing")
+	}
+}
+
+// ============== SSE END-TO-END TESTS ==============
+
+// mockEasyrun simulates an easyrun agent with SSE events, jobs, and task status.
+type mockEasyrun struct {
+	mu         sync.Mutex
+	serverURL  string
+	jobs       map[string][]easylib.Task // jobName → tasks on "agent1"
+	sseClients []http.ResponseWriter
+	sseFlushed []http.Flusher
+	sseDone    chan struct{} // close to disconnect all SSE clients
+}
+
+func newMockEasyrun() *mockEasyrun {
+	return &mockEasyrun{
+		jobs:    make(map[string][]easylib.Task),
+		sseDone: make(chan struct{}),
+	}
+}
+
+func (m *mockEasyrun) setJob(name string, tasks []easylib.Task) {
+	m.mu.Lock()
+	m.jobs[name] = tasks
+	m.mu.Unlock()
+}
+
+func (m *mockEasyrun) sendSSE(event, data string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for i, w := range m.sseClients {
+		fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, data)
+		m.sseFlushed[i].Flush()
+	}
+}
+
+func (m *mockEasyrun) handler() http.Handler {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/v1/status", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"cluster_name": "test-cluster",
+		})
+	})
+
+	mux.HandleFunc("/v1/jobs", func(w http.ResponseWriter, r *http.Request) {
+		m.mu.Lock()
+		var jobs []easylib.Job
+		for name := range m.jobs {
+			jobs = append(jobs, easylib.Job{Name: name})
+		}
+		m.mu.Unlock()
+		_ = json.NewEncoder(w).Encode(jobs)
+	})
+
+	mux.HandleFunc("/v1/jobs/", func(w http.ResponseWriter, r *http.Request) {
+		// Extract job name from /v1/jobs/{name}/status
+		path := r.URL.Path
+		// trim prefix and suffix
+		name := path[len("/v1/jobs/"):]
+		if idx := len(name) - len("/status"); idx > 0 && name[idx:] == "/status" {
+			name = name[:idx]
+		}
+
+		m.mu.Lock()
+		tasks := m.jobs[name]
+		m.mu.Unlock()
+
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"agents": []easylib.Agent{{ID: "agent1", Endpoint: m.serverURL}},
+			"tasks_by_agent": map[string][]easylib.Task{
+				"agent1": tasks,
+			},
+		})
+	})
+
+	mux.HandleFunc("/v1/events", func(w http.ResponseWriter, r *http.Request) {
+		f, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "no flusher", 500)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(200)
+
+		// Send ping
+		fmt.Fprintf(w, "event: ping\ndata: {}\n\n")
+		f.Flush()
+
+		m.mu.Lock()
+		m.sseClients = append(m.sseClients, w)
+		m.sseFlushed = append(m.sseFlushed, f)
+		m.mu.Unlock()
+
+		// Block until client disconnects or test closes SSE
+		select {
+		case <-r.Context().Done():
+		case <-m.sseDone:
+		}
+	})
+
+	return mux
+}
+
+// TestSSE_JobEvent verifies the full pipeline:
+// SSE job event → debounce → refreshJob → cache updated.
+func TestSSE_JobEvent(t *testing.T) {
+	mock := newMockEasyrun()
+	mock.setJob("api", []easylib.Task{
+		{ID: "t1", JobName: "api", State: "running"},
+	})
+
+	server := httptest.NewServer(mock.handler())
+	defer server.Close()
+	mock.serverURL = server.URL
+
+	cache := NewCache()
+	watcher := NewWatcher(server.URL, cache, "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go watcher.Run(ctx)
+
+	// Wait for SSE connect + initial refresh
+	time.Sleep(300 * time.Millisecond)
+
+	// Initial refresh should have populated cache
+	if ips := cache.GetCluster("test-cluster", "api"); len(ips) != 1 {
+		t.Fatalf("Expected 1 IP after initial refresh, got %d", len(ips))
+	}
+
+	// Add a new task to the job (simulating scale-up)
+	mock.setJob("api", []easylib.Task{
+		{ID: "t1", JobName: "api", State: "running"},
+		{ID: "t2", JobName: "api", State: "running"},
+	})
+
+	// Send SSE job event
+	mock.sendSSE("job", `{"name":"api"}`)
+
+	// Wait for debounce (500ms) + refresh
+	time.Sleep(800 * time.Millisecond)
+
+	// Cache should still show 1 IP (same agent, deduped)
+	ips := cache.GetCluster("test-cluster", "api")
+	if len(ips) != 1 {
+		t.Errorf("Expected 1 IP (same agent), got %d", len(ips))
+	}
+}
+
+// TestSSE_TaskEvent verifies task lifecycle events update the cache.
+func TestSSE_TaskEvent(t *testing.T) {
+	mock := newMockEasyrun()
+	mock.setJob("worker", []easylib.Task{
+		{ID: "t1", JobName: "worker", State: "running"},
+	})
+
+	server := httptest.NewServer(mock.handler())
+	defer server.Close()
+	mock.serverURL = server.URL
+
+	cache := NewCache()
+	watcher := NewWatcher(server.URL, cache, "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go watcher.Run(ctx)
+
+	time.Sleep(300 * time.Millisecond)
+
+	if ips := cache.GetCluster("test-cluster", "worker"); len(ips) != 1 {
+		t.Fatalf("Expected 1 IP after initial refresh, got %d", len(ips))
+	}
+
+	// Task crashes → no running tasks
+	mock.setJob("worker", []easylib.Task{
+		{ID: "t1", JobName: "worker", State: "failed"},
+	})
+
+	// Send task event (uses "job" field)
+	mock.sendSSE("task", `{"job":"worker","event":"crash"}`)
+	time.Sleep(800 * time.Millisecond)
+
+	ips := cache.GetCluster("test-cluster", "worker")
+	if len(ips) != 0 {
+		t.Errorf("Expected 0 IPs after task crash, got %d", len(ips))
+	}
+}
+
+// TestSSE_NewJobAppears verifies that a brand new job appearing via SSE
+// triggers a refresh and populates the cache.
+func TestSSE_NewJobAppears(t *testing.T) {
+	mock := newMockEasyrun()
+	// Start with no jobs
+	server := httptest.NewServer(mock.handler())
+	defer server.Close()
+	mock.serverURL = server.URL
+
+	cache := NewCache()
+	watcher := NewWatcher(server.URL, cache, "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go watcher.Run(ctx)
+
+	time.Sleep(300 * time.Millisecond)
+
+	// No jobs initially
+	if ips := cache.GetCluster("test-cluster", "newapp"); len(ips) != 0 {
+		t.Fatalf("Expected 0 IPs initially, got %d", len(ips))
+	}
+
+	// New job appears
+	mock.setJob("newapp", []easylib.Task{
+		{ID: "t1", JobName: "newapp", State: "running"},
+	})
+
+	mock.sendSSE("job", `{"name":"newapp"}`)
+	time.Sleep(800 * time.Millisecond)
+
+	ips := cache.GetCluster("test-cluster", "newapp")
+	if len(ips) != 1 {
+		t.Errorf("Expected 1 IP after new job event, got %d", len(ips))
+	}
+}
+
+// TestSSE_Debounce verifies that rapid events are coalesced into one refresh.
+func TestSSE_Debounce(t *testing.T) {
+	var refreshCount int
+	var mu sync.Mutex
+
+	mock := newMockEasyrun()
+	mock.setJob("api", []easylib.Task{
+		{ID: "t1", JobName: "api", State: "running"},
+	})
+
+	mux := http.NewServeMux()
+	innerHandler := mock.handler()
+
+	// Wrap to count refreshes
+	mux.HandleFunc("/v1/jobs/api/status", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		refreshCount++
+		mu.Unlock()
+		innerHandler.ServeHTTP(w, r)
+	})
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		innerHandler.ServeHTTP(w, r)
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	mock.serverURL = server.URL
+
+	cache := NewCache()
+	watcher := NewWatcher(server.URL, cache, "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go watcher.Run(ctx)
+
+	time.Sleep(300 * time.Millisecond)
+
+	// Reset counter after initial refresh
+	mu.Lock()
+	refreshCount = 0
+	mu.Unlock()
+
+	// Send 5 rapid events for the same job
+	for i := 0; i < 5; i++ {
+		mock.sendSSE("task", `{"job":"api","event":"start"}`)
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Wait for debounce
+	time.Sleep(800 * time.Millisecond)
+
+	mu.Lock()
+	count := refreshCount
+	mu.Unlock()
+
+	// Should have been debounced to 1 refresh (not 5)
+	if count != 1 {
+		t.Errorf("Expected 1 debounced refresh, got %d", count)
+	}
+}
+
+// TestSSE_Disconnect verifies that cache is cleared when SSE disconnects.
+func TestSSE_Disconnect(t *testing.T) {
+	mock := newMockEasyrun()
+	mock.setJob("api", []easylib.Task{
+		{ID: "t1", JobName: "api", State: "running"},
+	})
+
+	server := httptest.NewServer(mock.handler())
+	defer server.Close()
+	mock.serverURL = server.URL
+
+	cache := NewCache()
+	watcher := NewWatcher(server.URL, cache, "")
+	watcher.interval = 50 * time.Millisecond // fast reconnect for test
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go watcher.Run(ctx)
+
+	time.Sleep(300 * time.Millisecond)
+
+	// Cache should be populated
+	if ips := cache.GetCluster("test-cluster", "api"); len(ips) != 1 {
+		t.Fatalf("Expected 1 IP before disconnect, got %d", len(ips))
+	}
+
+	// Close SSE stream → watcher detects disconnect → clears cache
+	close(mock.sseDone)
+	time.Sleep(200 * time.Millisecond)
+
+	// Cache should be cleared for this cluster
+	if ips := cache.GetCluster("test-cluster", "api"); len(ips) != 0 {
+		t.Errorf("Expected 0 IPs after disconnect (cache cleared), got %d", len(ips))
+	}
+}
+
+// TestSSE_MultipleJobEvents verifies that events for different jobs each
+// trigger their own refresh.
+func TestSSE_MultipleJobEvents(t *testing.T) {
+	mock := newMockEasyrun()
+	mock.setJob("api", []easylib.Task{
+		{ID: "t1", JobName: "api", State: "running"},
+	})
+	mock.setJob("worker", []easylib.Task{
+		{ID: "t2", JobName: "worker", State: "running"},
+	})
+
+	server := httptest.NewServer(mock.handler())
+	defer server.Close()
+	mock.serverURL = server.URL
+
+	cache := NewCache()
+	watcher := NewWatcher(server.URL, cache, "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go watcher.Run(ctx)
+
+	time.Sleep(300 * time.Millisecond)
+
+	// Both jobs should be in cache after initial refresh
+	if ips := cache.GetCluster("test-cluster", "api"); len(ips) != 1 {
+		t.Errorf("Expected 1 IP for api, got %d", len(ips))
+	}
+	if ips := cache.GetCluster("test-cluster", "worker"); len(ips) != 1 {
+		t.Errorf("Expected 1 IP for worker, got %d", len(ips))
+	}
+
+	// Stop worker tasks
+	mock.setJob("worker", []easylib.Task{
+		{ID: "t2", JobName: "worker", State: "stopped"},
+	})
+
+	// Send event only for worker
+	mock.sendSSE("job", `{"name":"worker"}`)
+	time.Sleep(800 * time.Millisecond)
+
+	// api should be unchanged
+	if ips := cache.GetCluster("test-cluster", "api"); len(ips) != 1 {
+		t.Errorf("api should still have 1 IP, got %d", len(ips))
+	}
+	// worker should be cleared
+	if ips := cache.GetCluster("test-cluster", "worker"); len(ips) != 0 {
+		t.Errorf("worker should have 0 IPs after stop, got %d", len(ips))
 	}
 }
