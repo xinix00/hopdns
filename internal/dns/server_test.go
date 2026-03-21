@@ -56,6 +56,18 @@ func TestServerHandleQueryNoCluster(t *testing.T) {
 	if len(rw.msg.Answer) != 0 {
 		t.Errorf("Expected 0 answers for query without cluster, got %d", len(rw.msg.Answer))
 	}
+
+	// Should have SOA in Authority for negative caching
+	if len(rw.msg.Ns) != 1 {
+		t.Fatalf("Expected 1 SOA in Authority, got %d", len(rw.msg.Ns))
+	}
+	soa, ok := rw.msg.Ns[0].(*dns.SOA)
+	if !ok {
+		t.Fatal("Authority record is not SOA")
+	}
+	if soa.Minttl != 5 {
+		t.Errorf("SOA Minttl: expected 5, got %d", soa.Minttl)
+	}
 }
 
 func TestServerHandleQueryWrongDomain(t *testing.T) {
@@ -128,6 +140,55 @@ func TestServerHandleQueryDifferentClusters(t *testing.T) {
 	}
 	if rw2.msg.Answer[0].(*dns.A).A.String() != "10.0.1.1" {
 		t.Errorf("prod-us: expected 10.0.1.1, got %s", rw2.msg.Answer[0].(*dns.A).A.String())
+	}
+}
+
+func TestServerHandleQueryServiceDown(t *testing.T) {
+	cache := NewCache()
+	// Service exists but has no IPs (all tasks stopped)
+	cache.Set("prod", "myapp", nil)
+
+	server := NewServer(cache, ":0", "internal")
+
+	req := new(dns.Msg)
+	req.SetQuestion("myapp.prod.internal.", dns.TypeA)
+
+	rw := &mockResponseWriter{}
+	server.handleQuery(rw, req)
+
+	if len(rw.msg.Answer) != 0 {
+		t.Errorf("Expected 0 answers for down service, got %d", len(rw.msg.Answer))
+	}
+
+	// SOA must be present so resolvers cache the negative response for only 5s
+	if len(rw.msg.Ns) != 1 {
+		t.Fatalf("Expected 1 SOA in Authority, got %d", len(rw.msg.Ns))
+	}
+	soa := rw.msg.Ns[0].(*dns.SOA)
+	if soa.Minttl != 5 {
+		t.Errorf("SOA Minttl: expected 5, got %d", soa.Minttl)
+	}
+}
+
+func TestServerHandleQuerySuccessNoSOA(t *testing.T) {
+	cache := NewCache()
+	cache.Set("prod", "myapp", []net.IP{net.ParseIP("192.168.1.10")})
+
+	server := NewServer(cache, ":0", "internal")
+
+	req := new(dns.Msg)
+	req.SetQuestion("myapp.prod.internal.", dns.TypeA)
+
+	rw := &mockResponseWriter{}
+	server.handleQuery(rw, req)
+
+	if len(rw.msg.Answer) != 1 {
+		t.Fatalf("Expected 1 answer, got %d", len(rw.msg.Answer))
+	}
+
+	// Successful response should NOT have SOA
+	if len(rw.msg.Ns) != 0 {
+		t.Errorf("Expected no SOA in Authority for successful response, got %d", len(rw.msg.Ns))
 	}
 }
 

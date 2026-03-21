@@ -91,5 +91,25 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 		}
 	}
 
+	// RFC 2308: add SOA to Authority section for empty responses so resolvers
+	// use our MinTtl (5s) as negative cache TTL instead of their own default.
+	if len(m.Answer) == 0 {
+		m.Ns = append(m.Ns, &dns.SOA{
+			Hdr: dns.RR_Header{
+				Name:   s.domain,
+				Rrtype: dns.TypeSOA,
+				Class:  dns.ClassINET,
+				Ttl:    5,
+			},
+			Ns:      "ns." + s.domain,
+			Mbox:    "hostmaster." + s.domain,
+			Serial:  1,
+			Refresh: 5,
+			Retry:   5,
+			Expire:  5,
+			Minttl:  5, // Negative cache TTL — match our 5s polling interval
+		})
+	}
+
 	_ = w.WriteMsg(m)
 }
