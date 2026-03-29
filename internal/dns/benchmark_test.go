@@ -5,7 +5,7 @@ import (
 	"net"
 	"testing"
 
-	"easylib"
+	"hoplib"
 	"github.com/miekg/dns"
 )
 
@@ -236,14 +236,14 @@ func BenchmarkParseJobFromData(b *testing.B) {
 		`data: {"name":"my-api"}`,
 		`data: {"name":"web-frontend"}`,
 		`data: {"name":"worker-pool"}`,
-		`data: {"name":"easydns"}`,
+		`data: {"name":"hopdns"}`,
 	}
 
 	b.ResetTimer()
 	b.ReportAllocs()
 
 	for i := 0; i < b.N; i++ {
-		job := easylib.ParseJobFromSSE(lines[i%len(lines)])
+		job := hoplib.ParseJobFromSSE(lines[i%len(lines)])
 		if job == "" {
 			b.Fatal("expected non-empty job")
 		}

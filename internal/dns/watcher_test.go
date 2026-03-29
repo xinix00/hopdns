@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"easylib"
+	"hoplib"
 )
 
 func TestWatcherRefresh(t *testing.T) {
@@ -19,7 +19,7 @@ func TestWatcherRefresh(t *testing.T) {
 	var serverURL string
 
 	mux.HandleFunc("/v1/jobs", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode([]easylib.Job{
+		_ = json.NewEncoder(w).Encode([]hoplib.Job{
 			{Name: "myapp"},
 			{Name: "other"},
 		})
@@ -27,8 +27,8 @@ func TestWatcherRefresh(t *testing.T) {
 
 	mux.HandleFunc("/v1/jobs/myapp/status", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"agents": []easylib.Agent{{ID: "agent1", Endpoint: serverURL}},
-			"tasks_by_agent": map[string][]easylib.Task{
+			"agents": []hoplib.Agent{{ID: "agent1", Endpoint: serverURL}},
+			"tasks_by_agent": map[string][]hoplib.Task{
 				"agent1": {
 					{ID: "task1", JobName: "myapp", State: "running"},
 					{ID: "task2", JobName: "myapp", State: "running"},
@@ -39,8 +39,8 @@ func TestWatcherRefresh(t *testing.T) {
 
 	mux.HandleFunc("/v1/jobs/other/status", func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"agents": []easylib.Agent{{ID: "agent1", Endpoint: serverURL}},
-			"tasks_by_agent": map[string][]easylib.Task{
+			"agents": []hoplib.Agent{{ID: "agent1", Endpoint: serverURL}},
+			"tasks_by_agent": map[string][]hoplib.Task{
 				"agent1": {
 					{ID: "task3", JobName: "other", State: "stopped"},
 				},
@@ -101,7 +101,7 @@ func TestExtractIPInvalid(t *testing.T) {
 func TestWatcherNoAgents(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/jobs", func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode([]easylib.Job{})
+		_ = json.NewEncoder(w).Encode([]hoplib.Job{})
 	})
 
 	server := httptest.NewServer(mux)
@@ -166,30 +166,30 @@ func TestWatcherDiscoverClusterMissing(t *testing.T) {
 
 // ============== SSE END-TO-END TESTS ==============
 
-// mockEasyrun simulates an easyrun agent with SSE events, jobs, and task status.
-type mockEasyrun struct {
+// mockHop simulates an hop agent with SSE events, jobs, and task status.
+type mockHop struct {
 	mu         sync.Mutex
 	serverURL  string
-	jobs       map[string][]easylib.Task // jobName → tasks on "agent1"
+	jobs       map[string][]hoplib.Task // jobName → tasks on "agent1"
 	sseClients []http.ResponseWriter
 	sseFlushed []http.Flusher
 	sseDone    chan struct{} // close to disconnect all SSE clients
 }
 
-func newMockEasyrun() *mockEasyrun {
-	return &mockEasyrun{
-		jobs:    make(map[string][]easylib.Task),
+func newMockHop() *mockHop {
+	return &mockHop{
+		jobs:    make(map[string][]hoplib.Task),
 		sseDone: make(chan struct{}),
 	}
 }
 
-func (m *mockEasyrun) setJob(name string, tasks []easylib.Task) {
+func (m *mockHop) setJob(name string, tasks []hoplib.Task) {
 	m.mu.Lock()
 	m.jobs[name] = tasks
 	m.mu.Unlock()
 }
 
-func (m *mockEasyrun) sendSSE(event, data string) {
+func (m *mockHop) sendSSE(event, data string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for i, w := range m.sseClients {
@@ -198,7 +198,7 @@ func (m *mockEasyrun) sendSSE(event, data string) {
 	}
 }
 
-func (m *mockEasyrun) handler() http.Handler {
+func (m *mockHop) handler() http.Handler {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/v1/status", func(w http.ResponseWriter, r *http.Request) {
@@ -209,9 +209,9 @@ func (m *mockEasyrun) handler() http.Handler {
 
 	mux.HandleFunc("/v1/jobs", func(w http.ResponseWriter, r *http.Request) {
 		m.mu.Lock()
-		var jobs []easylib.Job
+		var jobs []hoplib.Job
 		for name := range m.jobs {
-			jobs = append(jobs, easylib.Job{Name: name})
+			jobs = append(jobs, hoplib.Job{Name: name})
 		}
 		m.mu.Unlock()
 		_ = json.NewEncoder(w).Encode(jobs)
@@ -231,8 +231,8 @@ func (m *mockEasyrun) handler() http.Handler {
 		m.mu.Unlock()
 
 		_ = json.NewEncoder(w).Encode(map[string]any{
-			"agents": []easylib.Agent{{ID: "agent1", Endpoint: m.serverURL}},
-			"tasks_by_agent": map[string][]easylib.Task{
+			"agents": []hoplib.Agent{{ID: "agent1", Endpoint: m.serverURL}},
+			"tasks_by_agent": map[string][]hoplib.Task{
 				"agent1": tasks,
 			},
 		})
@@ -269,8 +269,8 @@ func (m *mockEasyrun) handler() http.Handler {
 // TestSSE_JobEvent verifies the full pipeline:
 // SSE job event → debounce → refreshJob → cache updated.
 func TestSSE_JobEvent(t *testing.T) {
-	mock := newMockEasyrun()
-	mock.setJob("api", []easylib.Task{
+	mock := newMockHop()
+	mock.setJob("api", []hoplib.Task{
 		{ID: "t1", JobName: "api", State: "running"},
 	})
 
@@ -294,7 +294,7 @@ func TestSSE_JobEvent(t *testing.T) {
 	}
 
 	// Add a new task to the job (simulating scale-up)
-	mock.setJob("api", []easylib.Task{
+	mock.setJob("api", []hoplib.Task{
 		{ID: "t1", JobName: "api", State: "running"},
 		{ID: "t2", JobName: "api", State: "running"},
 	})
@@ -314,8 +314,8 @@ func TestSSE_JobEvent(t *testing.T) {
 
 // TestSSE_TaskEvent verifies task lifecycle events update the cache.
 func TestSSE_TaskEvent(t *testing.T) {
-	mock := newMockEasyrun()
-	mock.setJob("worker", []easylib.Task{
+	mock := newMockHop()
+	mock.setJob("worker", []hoplib.Task{
 		{ID: "t1", JobName: "worker", State: "running"},
 	})
 
@@ -337,7 +337,7 @@ func TestSSE_TaskEvent(t *testing.T) {
 	}
 
 	// Task crashes → no running tasks
-	mock.setJob("worker", []easylib.Task{
+	mock.setJob("worker", []hoplib.Task{
 		{ID: "t1", JobName: "worker", State: "failed"},
 	})
 
@@ -354,7 +354,7 @@ func TestSSE_TaskEvent(t *testing.T) {
 // TestSSE_NewJobAppears verifies that a brand new job appearing via SSE
 // triggers a refresh and populates the cache.
 func TestSSE_NewJobAppears(t *testing.T) {
-	mock := newMockEasyrun()
+	mock := newMockHop()
 	// Start with no jobs
 	server := httptest.NewServer(mock.handler())
 	defer server.Close()
@@ -375,7 +375,7 @@ func TestSSE_NewJobAppears(t *testing.T) {
 	}
 
 	// New job appears
-	mock.setJob("newapp", []easylib.Task{
+	mock.setJob("newapp", []hoplib.Task{
 		{ID: "t1", JobName: "newapp", State: "running"},
 	})
 
@@ -393,8 +393,8 @@ func TestSSE_Debounce(t *testing.T) {
 	var refreshCount int
 	var mu sync.Mutex
 
-	mock := newMockEasyrun()
-	mock.setJob("api", []easylib.Task{
+	mock := newMockHop()
+	mock.setJob("api", []hoplib.Task{
 		{ID: "t1", JobName: "api", State: "running"},
 	})
 
@@ -451,8 +451,8 @@ func TestSSE_Debounce(t *testing.T) {
 
 // TestSSE_Disconnect verifies that cache is cleared when SSE disconnects.
 func TestSSE_Disconnect(t *testing.T) {
-	mock := newMockEasyrun()
-	mock.setJob("api", []easylib.Task{
+	mock := newMockHop()
+	mock.setJob("api", []hoplib.Task{
 		{ID: "t1", JobName: "api", State: "running"},
 	})
 
@@ -488,11 +488,11 @@ func TestSSE_Disconnect(t *testing.T) {
 // TestSSE_MultipleJobEvents verifies that events for different jobs each
 // trigger their own refresh.
 func TestSSE_MultipleJobEvents(t *testing.T) {
-	mock := newMockEasyrun()
-	mock.setJob("api", []easylib.Task{
+	mock := newMockHop()
+	mock.setJob("api", []hoplib.Task{
 		{ID: "t1", JobName: "api", State: "running"},
 	})
-	mock.setJob("worker", []easylib.Task{
+	mock.setJob("worker", []hoplib.Task{
 		{ID: "t2", JobName: "worker", State: "running"},
 	})
 
@@ -518,7 +518,7 @@ func TestSSE_MultipleJobEvents(t *testing.T) {
 	}
 
 	// Stop worker tasks
-	mock.setJob("worker", []easylib.Task{
+	mock.setJob("worker", []hoplib.Task{
 		{ID: "t2", JobName: "worker", State: "stopped"},
 	})
 

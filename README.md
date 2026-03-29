@@ -1,11 +1,11 @@
-# easydns
+# hopdns
 
-DNS service discovery for easyrun with KISS federation.
+DNS service discovery for hop with KISS federation.
 
 ## Features
 
 - Resolves job names to task IPs via DNS
-- **Real-time updates** via SSE (Server-Sent Events) from easyrun agents
+- **Real-time updates** via SSE (Server-Sent Events) from hop agents
 - **Federation** — multi-cluster DNS, every cluster is a `-peer`
 - Returns multiple A records for jobs with multiple tasks
 - Short TTL (5s) for dynamic services
@@ -15,10 +15,10 @@ DNS service discovery for easyrun with KISS federation.
 
 ```bash
 # Single cluster
-./easydns -listen :5353 -peer http://127.0.0.1:8080
+./hopdns -listen :5353 -peer http://127.0.0.1:8080
 
 # Federation: local + remote clusters (via VPN)
-./easydns -listen :5353 \
+./hopdns -listen :5353 \
   -peer http://127.0.0.1:8080 \
   -peer http://10.0.1.100:8080 \
   -peer http://10.0.2.100:8080
@@ -28,8 +28,8 @@ DNS service discovery for easyrun with KISS federation.
 
 - `-listen` - DNS address to listen on (default `:5353`, use `:53` for standard DNS)
 - `-peer` - Cluster agent endpoint (repeatable, at least one required)
-- `-domain` - DNS domain suffix (default `easyrun.local`)
-- `-api-key` - API key for easyrun agent authentication
+- `-domain` - DNS domain suffix (default `hop.local`)
+- `-api-key` - API key for hop agent authentication
 
 ## How it works
 
@@ -44,33 +44,33 @@ DNS service discovery for easyrun with KISS federation.
 
 ```bash
 # All clusters merged
-dig @localhost -p 5353 myapp.easyrun.local
+dig @localhost -p 5353 myapp.hop.local
 
 # Specific cluster only
-dig @localhost -p 5353 myapp.prod-eu.easyrun.local
+dig @localhost -p 5353 myapp.prod-eu.hop.local
 ```
 
 | Query | Resolves to |
 |-------|-------------|
-| `myapp.easyrun.local` | IPs from **all** peers merged |
-| `myapp.prod-eu.easyrun.local` | IPs from cluster "prod-eu" only |
+| `myapp.hop.local` | IPs from **all** peers merged |
+| `myapp.prod-eu.hop.local` | IPs from cluster "prod-eu" only |
 
 ## Example
 
 ```bash
-# Start easydns with 2 clusters
-./easydns -listen :5353 \
+# Start hopdns with 2 clusters
+./hopdns -listen :5353 \
   -peer http://127.0.0.1:8080 \
   -peer http://10.0.1.100:8080
 
 # Query a job (merged across all clusters)
-dig @localhost -p 5353 myapp.easyrun.local
-# myapp.easyrun.local.  5  IN  A  192.168.1.10
-# myapp.easyrun.local.  5  IN  A  10.0.1.20
+dig @localhost -p 5353 myapp.hop.local
+# myapp.hop.local.  5  IN  A  192.168.1.10
+# myapp.hop.local.  5  IN  A  10.0.1.20
 
 # Query a job in specific cluster
-dig @localhost -p 5353 myapp.prod-eu.easyrun.local
-# myapp.prod-eu.easyrun.local.  5  IN  A  192.168.1.10
+dig @localhost -p 5353 myapp.prod-eu.hop.local
+# myapp.prod-eu.hop.local.  5  IN  A  192.168.1.10
 ```
 
 ## Cache behavior

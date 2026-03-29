@@ -1,6 +1,6 @@
 # Performance Benchmarks
 
-Comprehensive performance tests for easydns's critical components.
+Comprehensive performance tests for hopdns's critical components.
 
 ## Running Benchmarks
 

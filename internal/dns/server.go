@@ -54,7 +54,7 @@ func (s *Server) Shutdown() error {
 
 // handleQuery handles DNS queries.
 // Format: <service>.<cluster>.<domain> → IPs from that cluster
-// Example: myapp.prod-eu.easyrun.local → IPs for "myapp" in cluster "prod-eu"
+// Example: myapp.prod-eu.hop.local → IPs for "myapp" in cluster "prod-eu"
 func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 	m := new(dns.Msg)
 	m.SetReply(r)
@@ -65,7 +65,7 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 			continue
 		}
 
-		// Strip domain suffix: "myapp.prod-eu.easyrun.local." → "myapp.prod-eu"
+		// Strip domain suffix: "myapp.prod-eu.hop.local." → "myapp.prod-eu"
 		prefix := strings.TrimSuffix(q.Name, "."+s.domain)
 		if prefix == q.Name {
 			continue // Query doesn't match our domain

@@ -1,15 +1,15 @@
-module easydns
+module hopdns
 
 go 1.24.0
 
 toolchain go1.24.3
 
 require (
-	easylib v0.0.0
+	hoplib v0.0.0
 	github.com/miekg/dns v1.1.72
 )
 
-replace easylib => ../easylib
+replace hoplib => ../hoplib
 
 require (
 	golang.org/x/mod v0.31.0 // indirect

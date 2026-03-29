@@ -11,15 +11,15 @@ import (
 	"strings"
 	"time"
 
-	"easylib"
+	"hoplib"
 )
 
-// Watcher watches an easyrun cluster via SSE and keeps the cache updated.
+// Watcher watches an hop cluster via SSE and keeps the cache updated.
 // Every cluster (including your own) is a peer — there is no special "local" watcher.
 type Watcher struct {
 	agentAddr string
 	cache     *Cache
-	client    *easylib.Client
+	client    *hoplib.Client
 	interval  time.Duration
 	cluster   string // discovered from /v1/status → cluster_name
 }
@@ -29,7 +29,7 @@ func NewWatcher(agentAddr string, cache *Cache, apiKey string) *Watcher {
 	return &Watcher{
 		agentAddr: agentAddr,
 		cache:     cache,
-		client:    easylib.NewClient(apiKey),
+		client:    hoplib.NewClient(apiKey),
 		interval:  5 * time.Second,
 	}
 }
@@ -80,14 +80,14 @@ func (w *Watcher) Run(ctx context.Context) {
 
 // discoverCluster fetches /v1/status and extracts cluster_name
 func (w *Watcher) discoverCluster() (string, error) {
-	status, err := easylib.Fetch[struct {
+	status, err := hoplib.Fetch[struct {
 		ClusterName string `json:"cluster_name"`
 	}](w.client, w.agentAddr+"/v1/status")
 	if err != nil {
 		return "", err
 	}
 	if status.ClusterName == "" {
-		return "", fmt.Errorf("remote cluster did not report cluster_name (upgrade easyrun?)")
+		return "", fmt.Errorf("remote cluster did not report cluster_name (upgrade hop?)")
 	}
 	return status.ClusterName, nil
 }
@@ -140,7 +140,7 @@ func (w *Watcher) watchSSE(ctx context.Context) error {
 				return nil // stream closed
 			}
 			if strings.HasPrefix(line, "data:") {
-				if job := easylib.ParseJobFromSSE(line); job != "" {
+				if job := hoplib.ParseJobFromSSE(line); job != "" {
 					if len(pending) == 0 {
 						debounce.Reset(500 * time.Millisecond)
 					}
@@ -158,9 +158,9 @@ func (w *Watcher) watchSSE(ctx context.Context) error {
 
 // refreshJob fetches status for a single job and updates the cache.
 func (w *Watcher) refreshJob(jobName string) {
-	status, err := easylib.Fetch[struct {
-		Agents       []easylib.Agent            `json:"agents"`
-		TasksByAgent map[string][]easylib.Task   `json:"tasks_by_agent"`
+	status, err := hoplib.Fetch[struct {
+		Agents       []hoplib.Agent            `json:"agents"`
+		TasksByAgent map[string][]hoplib.Task   `json:"tasks_by_agent"`
 	}](w.client, fmt.Sprintf("%s/v1/jobs/%s/status", w.agentAddr, jobName))
 	if err != nil {
 		log.Printf("[%s] (%s) failed to fetch job %s: %v", w.agentAddr, w.cluster, jobName, err)
@@ -188,7 +188,7 @@ func (w *Watcher) refreshJob(jobName string) {
 
 // refresh fetches all jobs and their task status, then updates the cache.
 func (w *Watcher) refresh() {
-	jobs, err := easylib.Fetch[[]easylib.Job](w.client, w.agentAddr+"/v1/jobs")
+	jobs, err := hoplib.Fetch[[]hoplib.Job](w.client, w.agentAddr+"/v1/jobs")
 	if err != nil {
 		log.Printf("[%s] (%s) failed to fetch jobs: %v", w.agentAddr, w.cluster, err)
 		return
@@ -196,9 +196,9 @@ func (w *Watcher) refresh() {
 
 	data := make(map[string][]net.IP)
 	for _, job := range jobs {
-		status, err := easylib.Fetch[struct {
-			Agents       []easylib.Agent          `json:"agents"`
-			TasksByAgent map[string][]easylib.Task `json:"tasks_by_agent"`
+		status, err := hoplib.Fetch[struct {
+			Agents       []hoplib.Agent          `json:"agents"`
+			TasksByAgent map[string][]hoplib.Task `json:"tasks_by_agent"`
 		}](w.client, fmt.Sprintf("%s/v1/jobs/%s/status", w.agentAddr, job.Name))
 		if err != nil {
 			log.Printf("[%s] (%s) failed to fetch job %s: %v", w.agentAddr, w.cluster, job.Name, err)
@@ -223,7 +223,7 @@ func (w *Watcher) refresh() {
 	log.Printf("[%s] (%s) cache updated: %d jobs", w.agentAddr, w.cluster, len(data))
 }
 
-func buildAgentIPs(agents []easylib.Agent) map[string]net.IP {
+func buildAgentIPs(agents []hoplib.Agent) map[string]net.IP {
 	ips := make(map[string]net.IP)
 	for _, agent := range agents {
 		if ip := extractIP(agent.Endpoint); ip != nil {

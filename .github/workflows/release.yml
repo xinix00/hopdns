@@ -37,11 +37,11 @@ jobs:
 
           for plat in $PLATFORMS; do
             IFS=: read -r os arch <<< "$plat"
-            dir="dist/easydns-${VERSION}-${os}-${arch}"
+            dir="dist/hopdns-${VERSION}-${os}-${arch}"
             mkdir -p "$dir"
 
             CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
-              go build -trimpath -ldflags="$LDFLAGS" -o "$dir/easydns" ./cmd/easydns
+              go build -trimpath -ldflags="$LDFLAGS" -o "$dir/hopdns" ./cmd/hopdns
 
             tar czf "${dir}.tar.gz" -C dist "$(basename $dir)"
             rm -rf "$dir"
