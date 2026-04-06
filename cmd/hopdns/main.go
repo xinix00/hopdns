@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"log"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -24,16 +25,16 @@ func (s *stringSlice) Set(value string) error {
 func main() {
 	listenAddr := flag.String("listen", ":8053", "DNS address to listen on")
 	domain := flag.String("domain", "internal", "DNS domain suffix")
-	apiKey := flag.String("api-key", "", "API key for hop agent authentication")
+	defaultAPIKey := flag.String("api-key", "", "Default API key (overridden by key@ in peer URL)")
 	var peers stringSlice
-	flag.Var(&peers, "peer", "Cluster agent endpoint (repeatable, e.g., -peer http://127.0.0.1:8080 -peer http://10.0.1.100:8080)")
+	flag.Var(&peers, "peer", "Cluster agent endpoint (repeatable, e.g., -peer http://host:8080 -peer http://key@host:8080)")
 	flag.Parse()
 
 	if len(peers) == 0 {
 		log.Fatal("at least one -peer required (e.g., -peer http://127.0.0.1:8080)")
 	}
 
-	log.Printf("Starting hopdns on %s, domain=%s, peers=%v", *listenAddr, *domain, peers)
+	log.Printf("Starting hopdns on %s, domain=%s, peers=%d", *listenAddr, *domain, len(peers))
 
 	cache := dns.NewCache()
 	server := dns.NewServer(cache, *listenAddr, *domain)
@@ -42,12 +43,14 @@ func main() {
 	defer cancel()
 
 	// Start a watcher for each peer (including local cluster)
-	for _, endpoint := range peers {
-		endpoint = strings.TrimSpace(endpoint)
-		if endpoint == "" {
+	for _, raw := range peers {
+		raw = strings.TrimSpace(raw)
+		if raw == "" {
 			continue
 		}
-		w := dns.NewWatcher(endpoint, cache, *apiKey)
+
+		endpoint, apiKey := parsePeer(raw, *defaultAPIKey)
+		w := dns.NewWatcher(endpoint, cache, apiKey)
 		go w.Run(ctx)
 	}
 
@@ -63,4 +66,21 @@ func main() {
 	if err := server.Run(); err != nil {
 		log.Fatalf("DNS server error: %v", err)
 	}
+}
+
+// parsePeer extracts the API key from the peer URL's userinfo (key@host).
+// Returns the clean endpoint (without userinfo) and the API key to use.
+func parsePeer(raw, defaultKey string) (endpoint, apiKey string) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw, defaultKey
+	}
+
+	if u.User != nil {
+		key := u.User.Username()
+		u.User = nil
+		return u.String(), key
+	}
+
+	return raw, defaultKey
 }
