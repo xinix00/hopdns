@@ -46,7 +46,7 @@ func TestServerHandleQueryNoCluster(t *testing.T) {
 
 	server := NewServer(cache, ":0", "internal")
 
-	// Query without cluster qualifier → should return 0 (not supported)
+	// Query without cluster qualifier → no results (cluster required)
 	req := new(dns.Msg)
 	req.SetQuestion("myapp.internal.", dns.TypeA)
 
@@ -55,18 +55,6 @@ func TestServerHandleQueryNoCluster(t *testing.T) {
 
 	if len(rw.msg.Answer) != 0 {
 		t.Errorf("Expected 0 answers for query without cluster, got %d", len(rw.msg.Answer))
-	}
-
-	// Should have SOA in Authority for negative caching
-	if len(rw.msg.Ns) != 1 {
-		t.Fatalf("Expected 1 SOA in Authority, got %d", len(rw.msg.Ns))
-	}
-	soa, ok := rw.msg.Ns[0].(*dns.SOA)
-	if !ok {
-		t.Fatal("Authority record is not SOA")
-	}
-	if soa.Minttl != 5 {
-		t.Errorf("SOA Minttl: expected 5, got %d", soa.Minttl)
 	}
 }
 

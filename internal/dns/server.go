@@ -74,7 +74,7 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 		// Parse: "myapp.prod-eu" → service="myapp", cluster="prod-eu"
 		service, cluster, ok := strings.Cut(prefix, ".")
 		if !ok {
-			continue // No cluster qualifier — ignore
+			continue
 		}
 		ips := s.cache.GetCluster(cluster, service)
 

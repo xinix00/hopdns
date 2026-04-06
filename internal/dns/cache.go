@@ -28,6 +28,24 @@ func (c *Cache) GetCluster(cluster, jobName string) []net.IP {
 	return nil
 }
 
+// GetAll returns merged IPs for a job name across all clusters
+func (c *Cache) GetAll(jobName string) []net.IP {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	var result []net.IP
+	seen := map[string]bool{}
+	for _, jobs := range c.clusters {
+		for _, ip := range jobs[jobName] {
+			key := ip.String()
+			if !seen[key] {
+				seen[key] = true
+				result = append(result, ip)
+			}
+		}
+	}
+	return result
+}
+
 // Set stores IPs for a job name in a cluster
 func (c *Cache) Set(cluster, jobName string, ips []net.IP) {
 	c.mu.Lock()
