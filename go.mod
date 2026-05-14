@@ -5,8 +5,9 @@ go 1.24.0
 toolchain go1.24.3
 
 require (
-	hoplib v0.0.0
 	github.com/miekg/dns v1.1.72
+	gopkg.in/yaml.v3 v3.0.1
+	hoplib v0.0.0
 )
 
 replace hoplib => ../hoplib

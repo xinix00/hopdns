@@ -180,6 +180,100 @@ func TestServerHandleQuerySuccessNoSOA(t *testing.T) {
 	}
 }
 
+func TestServerHandleCNAMEExact(t *testing.T) {
+	cache := NewCache()
+	server := NewServer(cache, ":0", "hop.local")
+	server.SetCNAMEs(NewCNAMEs(map[string]string{
+		"mail.hop.local": "mailserver.example.com",
+	}))
+
+	req := new(dns.Msg)
+	req.SetQuestion("mail.hop.local.", dns.TypeA)
+
+	rw := &mockResponseWriter{}
+	server.handleQuery(rw, req)
+
+	if len(rw.msg.Answer) != 1 {
+		t.Fatalf("expected 1 answer, got %d", len(rw.msg.Answer))
+	}
+	cn, ok := rw.msg.Answer[0].(*dns.CNAME)
+	if !ok {
+		t.Fatalf("answer is not CNAME: %T", rw.msg.Answer[0])
+	}
+	if cn.Target != "mailserver.example.com." {
+		t.Errorf("target = %q, want mailserver.example.com.", cn.Target)
+	}
+	if cn.Hdr.Name != "mail.hop.local." {
+		t.Errorf("name = %q, want mail.hop.local.", cn.Hdr.Name)
+	}
+}
+
+func TestServerHandleCNAMEWildcard(t *testing.T) {
+	cache := NewCache()
+	server := NewServer(cache, ":0", "hop.local")
+	server.SetCNAMEs(NewCNAMEs(map[string]string{
+		"*.apps.hop.local": "ingress.prod-eu.hop.local",
+	}))
+
+	req := new(dns.Msg)
+	req.SetQuestion("dashboard.apps.hop.local.", dns.TypeA)
+
+	rw := &mockResponseWriter{}
+	server.handleQuery(rw, req)
+
+	if len(rw.msg.Answer) != 1 {
+		t.Fatalf("expected 1 answer, got %d", len(rw.msg.Answer))
+	}
+	cn := rw.msg.Answer[0].(*dns.CNAME)
+	if cn.Target != "ingress.prod-eu.hop.local." {
+		t.Errorf("target = %q", cn.Target)
+	}
+}
+
+func TestServerCNAMEForExplicitCNAMEQuery(t *testing.T) {
+	cache := NewCache()
+	server := NewServer(cache, ":0", "hop.local")
+	server.SetCNAMEs(NewCNAMEs(map[string]string{
+		"mail.hop.local": "mailserver.example.com",
+	}))
+
+	req := new(dns.Msg)
+	req.SetQuestion("mail.hop.local.", dns.TypeCNAME)
+
+	rw := &mockResponseWriter{}
+	server.handleQuery(rw, req)
+
+	if len(rw.msg.Answer) != 1 {
+		t.Fatalf("expected 1 answer for CNAME-typed query, got %d", len(rw.msg.Answer))
+	}
+	if _, ok := rw.msg.Answer[0].(*dns.CNAME); !ok {
+		t.Errorf("answer is not CNAME: %T", rw.msg.Answer[0])
+	}
+}
+
+func TestServerCNAMEBeatsServiceLookup(t *testing.T) {
+	// If a CNAME shadows a service name, the CNAME wins.
+	cache := NewCache()
+	cache.Set("prod", "mail", []net.IP{net.ParseIP("10.0.0.5")})
+	server := NewServer(cache, ":0", "hop.local")
+	server.SetCNAMEs(NewCNAMEs(map[string]string{
+		"mail.prod.hop.local": "external.example.com",
+	}))
+
+	req := new(dns.Msg)
+	req.SetQuestion("mail.prod.hop.local.", dns.TypeA)
+
+	rw := &mockResponseWriter{}
+	server.handleQuery(rw, req)
+
+	if len(rw.msg.Answer) != 1 {
+		t.Fatalf("expected 1 answer, got %d", len(rw.msg.Answer))
+	}
+	if _, ok := rw.msg.Answer[0].(*dns.CNAME); !ok {
+		t.Errorf("CNAME should win over service lookup, got %T", rw.msg.Answer[0])
+	}
+}
+
 // mockResponseWriter implements dns.ResponseWriter for testing
 type mockResponseWriter struct {
 	msg *dns.Msg

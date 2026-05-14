@@ -10,6 +10,7 @@ import (
 // Server handles DNS queries for service discovery
 type Server struct {
 	cache  *Cache
+	cnames *CNAMEs
 	domain string
 	addr   string
 	server *dns.Server
@@ -31,9 +32,25 @@ func NewServer(cache *Cache, addr, domain string) *Server {
 	}
 }
 
+// SetCNAMEs installs static CNAME mappings (matched before service lookup).
+// Safe to call before Run; not safe to call concurrently with queries.
+func (s *Server) SetCNAMEs(c *CNAMEs) {
+	s.cnames = c
+}
+
 // Run starts the DNS server
 func (s *Server) Run() error {
 	dns.HandleFunc(s.domain, s.handleQuery)
+
+	// CNAMEs can live in zones other than s.domain — register a handler
+	// for each so queries reach handleQuery and our lookup table wins.
+	for _, z := range s.cnames.Zones() {
+		if z == s.domain {
+			continue
+		}
+		dns.HandleFunc(z, s.handleQuery)
+		log.Printf("DNS handler registered for CNAME zone: %s", z)
+	}
 
 	s.server = &dns.Server{
 		Addr: s.addr,
@@ -61,6 +78,22 @@ func (s *Server) handleQuery(w dns.ResponseWriter, r *dns.Msg) {
 	m.Authoritative = true
 
 	for _, q := range r.Question {
+		// Static CNAMEs take precedence and apply to any query type.
+		// We return only the CNAME RR — no chasing — so the resolver
+		// will issue a follow-up query for the target.
+		if target, ok := s.cnames.Lookup(q.Name); ok {
+			m.Answer = append(m.Answer, &dns.CNAME{
+				Hdr: dns.RR_Header{
+					Name:   q.Name,
+					Rrtype: dns.TypeCNAME,
+					Class:  dns.ClassINET,
+					Ttl:    5,
+				},
+				Target: target,
+			})
+			continue
+		}
+
 		if q.Qtype != dns.TypeA {
 			continue
 		}
