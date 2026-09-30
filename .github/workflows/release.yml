@@ -9,50 +9,66 @@ permissions:
   contents: write
 
 jobs:
-  test:
+  gate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - run: rustup show
+      - run: tools/gate.sh
+
+  host:
+    needs: gate
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: linux-amd64
+          - os: ubuntu-24.04-arm
+            name: linux-arm64
+          - os: macos-latest
+            name: darwin-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - run: cargo build --release --features std --bin hopdns
+      - run: |
+          dir="hopdns-${GITHUB_REF_NAME}-${{ matrix.name }}"
+          mkdir -p "dist/$dir"
+          cp target/release/hopdns "dist/$dir/"
+          tar czf "dist/$dir.tar.gz" -C dist "$dir"
+      - uses: actions/upload-artifact@v4
         with:
-          go-version: '1.26'
-      - run: go test ./...
+          name: ${{ matrix.name }}
+          path: dist/*.tar.gz
+
+  hopos:
+    needs: gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show
+      - run: cargo build --release --features hopos --target aarch64-unknown-none-softfloat --bin hopdns-hopos
+      - run: |
+          mkdir -p dist
+          objcopy="$(ls "$(rustc --print sysroot)"/lib/rustlib/*/bin/rust-objcopy 2>/dev/null | head -1)"
+          src=target/aarch64-unknown-none-softfloat/release/hopdns-hopos
+          if [ -n "$objcopy" ]; then "$objcopy" --strip-debug "$src" dist/hopdns-hopos-arm64.elf; else cp "$src" dist/hopdns-hopos-arm64.elf; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hopos
+          path: dist/*.elf
 
   release:
-    needs: test
+    needs: [host, hopos]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/download-artifact@v4
         with:
-          go-version: '1.26'
-
-      - name: Build all platforms
-        run: |
-          VERSION="${GITHUB_REF_NAME}"
-          LDFLAGS="-s -w"
-          PLATFORMS="linux:amd64 linux:arm64 darwin:arm64"
-
-          mkdir -p dist
-
-          for plat in $PLATFORMS; do
-            IFS=: read -r os arch <<< "$plat"
-            dir="dist/hopdns-${VERSION}-${os}-${arch}"
-            mkdir -p "$dir"
-
-            CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
-              go build -trimpath -ldflags="$LDFLAGS" -o "$dir/hopdns" ./cmd/hopdns
-
-            tar czf "${dir}.tar.gz" -C dist "$(basename $dir)"
-            rm -rf "$dir"
-          done
-
-          cd dist && shasum -a 256 *.tar.gz > checksums.txt
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+          path: dist
+          merge-multiple: true
+      - run: cd dist && shasum -a 256 * > checksums.txt
+      - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: |
-            dist/*.tar.gz
-            dist/checksums.txt
+          files: dist/*
