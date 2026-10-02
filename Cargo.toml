@@ -52,9 +52,9 @@ hopos = ["hoplib/hopos", "dep:applib", "dep:sync"]
 # de gedeelde client van de plugins: de ondertekende verzoeken, de
 # antwoorden als hop's eigen typen, de SSE-lezer; zijn kern is sans-I/O en
 # staat dus ook in de kern van hopdns.
-hoplib = { git = "https://github.com/xinix00/hoplib.git", tag = "v3.0.0" }
-applib = { git = "https://github.com/xinix00/HopOS.git", tag = "v3.0.0-alpha.10", optional = true }
-sync = { git = "https://github.com/xinix00/HopOS.git", tag = "v3.0.0-alpha.10", optional = true }
+hoplib = { git = "https://github.com/xinix00/hoplib.git", tag = "v3.0.1" }
+applib = { git = "https://github.com/xinix00/HopOS.git", tag = "v3.0.0", optional = true }
+sync = { git = "https://github.com/xinix00/HopOS.git", tag = "v3.0.0", optional = true }
 
 # De harde set uit rustdoc/README.md §12.
 [workspace.lints.rust]

@@ -171,9 +171,9 @@ one job) as messages; nothing is shared behind a mutex.
 | `tools/qemu-test.sh` | Hop on QEMU places welcome and hopdns; hopdns resolves welcome |
 | `OLD/` | the Go generation (specification) |
 
-Dependencies come from tags only: `hoplib` v3.0.0 (the shared plugin
+Dependencies come from tags only: `hoplib` v3.0.1 (the shared plugin
 client), and for the resident `applib` and `sync` from HopOS
-v3.0.0-alpha.10.
+v3.0.0.
 
 ## Testing
 
